@@ -108,7 +108,7 @@ lbl = tk.Label(root, text = "", justify="left")
 
 def crosswalk_clicked():
     crossWalkInfo(int(txt.get()), lbl)
-
+aaa
 def roadsegment_clicked():
     roadSegmentInfo(int(txt.get()), lbl)
 
