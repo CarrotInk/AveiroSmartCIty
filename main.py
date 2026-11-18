@@ -5,8 +5,9 @@ import tkinter as tk
 import json
 
 #==Load Data==========================================================================================================
-smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv', nrows = 1000)
-road_segments = pd.read_csv('data/roadsegments_stats.csv', nrows=1000)
+smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv',nrows=1000)
+road_segments = pd.read_csv('data/roadsegments_stats.csv', nrows=100000)
+smart_parking = pd.read_csv('data/smartparking.csv',nrows=1000)
 #=====================================================================================================================
 
 def convertDate(json_to_convert):
@@ -52,7 +53,20 @@ def roadSegmentInfo(road_number, label):
                            f"- Max Allowed Velocity: {round((max_allowed_velocity * 3.6), 2)}"
                            f"")
 
-#=====================================================================================================================
+#===Parking==================================================================================================================
+def parkingInfo(parking_number):
+
+    temp = smart_parking.query("entityId == 'urn:ngsi-ld:ParkingSpot:{:04}'".format(parking_number))
+    temp = temp.reset_index()
+
+    for row_idx, row in enumerate(temp.itertuples()):
+
+        print("Index: ", smart_parking.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2)
+
+        data_dict = temp["documentJson"].apply(json.loads)
+
+        print("State Park:", get_value(data_dict, "state"))
+        print("Location Park:", get_value(data_dict, "location"))
 
 #===CrossWalks========================================================================================================
 def crossWalkInfo(crosswalk_number, label):
@@ -123,3 +137,11 @@ lbl.place(relx=0.64, rely=0.15, anchor="ne")
 lbl.config(font=("Arial", 15))
 
 root.mainloop()
+#=====================================================================================================================
+while True:
+    option = int(input("Crosswalk Info (1)   |   Road Segments Info (2)   |     Parking Status (3)      |   Exit (4)\n"))
+    match option:
+        case 1: crossWalkInfo(int(input("Which Crosswalk? ")))
+        case 2: roadSegmentInfo(int(input("Which Road? ")))
+        case 3: parkingInfo(int(input("Which Parking? ")))
+        case 4: break
