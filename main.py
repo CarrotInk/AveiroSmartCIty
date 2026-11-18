@@ -53,20 +53,27 @@ def roadSegmentInfo(road_number, label):
                            f"- Max Allowed Velocity: {round((max_allowed_velocity * 3.6), 2)}"
                            f"")
 
-#===Parking==================================================================================================================
-def parkingInfo(parking_number):
+#===Parking===========================================================================================================
+def parkingInfo(parking_number, label):
 
     temp = smart_parking.query("entityId == 'urn:ngsi-ld:ParkingSpot:{:04}'".format(parking_number))
     temp = temp.reset_index()
+
+    document_jsons = temp["documentJson"].apply(json.loads)
 
     for row_idx, row in enumerate(temp.itertuples()):
 
         print("Index: ", smart_parking.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2)
 
-        data_dict = temp["documentJson"].apply(json.loads)
+        data_dict = document_jsons[row.Index]
 
-        print("State Park:", get_value(data_dict, "state"))
-        print("Location Park:", get_value(data_dict, "location"))
+        print(f"State: {get_value(data_dict,'status')}")
+        print(f"Location Park: {get_value(data_dict, "location")}")
+
+        label.config(text=f"\n===Parking Slot {parking_number:04}===\n"
+                          f"State: {get_value(data_dict,'status')}\n"
+                          f"Location Park: {get_value(data_dict, "location")}\n"
+                          f"")
 
 #===CrossWalks========================================================================================================
 def crossWalkInfo(crosswalk_number, label):
@@ -126,9 +133,17 @@ def crosswalk_clicked():
 def roadsegment_clicked():
     roadSegmentInfo(int(txt.get()), lbl)
 
+def parking_clicked():
+    parkingInfo(int(txt.get()), lbl)
+
 crosswalk_btn = tk.Button(root, text = "Crosswalks", command= crosswalk_clicked, justify="center")
 crosswalk_btn.pack(side='left', anchor='ne', expand=True, pady=False)
 crosswalk_btn.config(font=("Arial", 15))
+
+parking_btn = tk.Button(root, text = "Parking Slot", command = parking_clicked, justify="center")
+parking_btn.pack(side='left', anchor='nw', expand=False, pady=False)
+parking_btn.config(font=("Arial", 15))
+
 roadsegment_btn = tk.Button(root, text = "Road Segments", command = roadsegment_clicked, justify="center")
 roadsegment_btn.pack(side='right', anchor='nw', expand=True, pady=False)
 roadsegment_btn.config(font=("Arial", 15))
