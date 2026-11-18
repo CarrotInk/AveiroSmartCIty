@@ -45,7 +45,7 @@ def roadSegmentInfo(road_number, label):
         print("Average Velocity Deviations:",get_value(data_dict, "averageVelocityStdDeviation"),"\n")
 
     print(f"\n===Road 1{road_number:04}===")
-    print(f"- Rua: {document_jsons.iloc[0].get("name")}\n")
+    print(f"- Rua: {document_jsons.iloc[0].get("name")}")
     print(f"- Max Allowed Velocity: {round((max_allowed_velocity * 3.6), 2)}\n")
 
     label.config(text = f"\n===Road 1{road_number:04}===\n"
@@ -117,7 +117,7 @@ def crossWalkInfo(crosswalk_number, label):
 
 #=====================================================================================================================
 root = tk.Tk()
-root.title("Welcome to GeekForGeeks")
+root.title("HDS's Amazing lil App")
 root.geometry('800x600')
 
 txt = tk.Entry(root, width=25)
@@ -152,11 +152,3 @@ lbl.place(relx=0.64, rely=0.15, anchor="ne")
 lbl.config(font=("Arial", 15))
 
 root.mainloop()
-#=====================================================================================================================
-while True:
-    option = int(input("Crosswalk Info (1)   |   Road Segments Info (2)   |     Parking Status (3)      |   Exit (4)\n"))
-    match option:
-        case 1: crossWalkInfo(int(input("Which Crosswalk? ")))
-        case 2: roadSegmentInfo(int(input("Which Road? ")))
-        case 3: parkingInfo(int(input("Which Parking? ")))
-        case 4: break
