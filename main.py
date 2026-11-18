@@ -1,8 +1,6 @@
-import re
 import pandas as pd
 from datetime import datetime, timezone
 import json
-import statistics as st
 
 smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv', usecols=['entityId', 'eventTimestamp'])
 
@@ -10,8 +8,11 @@ smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv', usecols=['entityId', 'e
 
 def crossWalkInfo(crosswalk_number):
         print("\nCrosswalk {:04}: ".format(crosswalk_number))
+        temp = smart_crosswalk.query("entityId=='urn:ngsi-ld:SmartCrosswalk:{:04}'".format(crosswalk_number))
+        temp = temp.reset_index()
+
         for i in range(10):
-            raw_value = smart_crosswalk['eventTimestamp'][i]
+            raw_value = temp["eventTimestamp"][i]
             data = json.loads(raw_value)
             milliseconds = int(data["$date"]["$numberLong"])
             dt = datetime.fromtimestamp(milliseconds / 1000.0, tz=timezone.utc)
@@ -19,10 +20,14 @@ def crossWalkInfo(crosswalk_number):
 
 def allCrosswalkInfo():
     for i in range(24):
-        id_iterator = "entityId=='urn:ngsi-ld:SmartCrosswalk:{:04}'".format(i)
-        print("\nCrosswalk {}: ".format(i))
-        print(smart_crosswalk.query(id_iterator)
-              ["eventTimestamp"][1:10])
+        temp = smart_crosswalk.query("entityId=='urn:ngsi-ld:SmartCrosswalk:{:04}'".format(i))
+        temp = temp.reset_index()
+        for j in range(10):
+            raw_value = temp["eventTimestamp"][j]
+            data = json.loads(raw_value)
+            milliseconds = int(data["$date"]["$numberLong"])
+            dt = datetime.fromtimestamp(milliseconds / 1000.0, tz=timezone.utc)
+            print(dt)
 
 
 #-------------------------------------------------------------------------------------------------------------
@@ -33,5 +38,3 @@ while True:
         case 1: crossWalkInfo(int(input("Which Crosswalk? ")))
         case 2: allCrosswalkInfo()
         case 3: break
-
-smart_crosswalk.close()
