@@ -82,12 +82,17 @@ def crossWalkInfo(crosswalk_number, label):
 
     wait_times = []
     traverse_times = []
+    date_time = []
+    wait_hour = []
 
     document_jsons = temp["documentJson"].apply(json.loads)
 
     for row_idx, row in enumerate(temp.itertuples()):
         print("Index: ", smart_crosswalk.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2)
         print(convertDate(row.eventTimestamp))
+
+        date_time.append(convertDate(row.eventTimestamp))
+
 
         data_dict = document_jsons[row.Index]
 
@@ -105,6 +110,10 @@ def crossWalkInfo(crosswalk_number, label):
         elif wait_time and ("$intDouble" in wait_time):
             print("Wait Time:", int(wait_time["$intDouble"]), "")
 
+        wait_hour=wait_hour.append([date_time[row_idx].time(),wait_time])
+
+
+    average_wait_hour=data_dict["wait_time"].value_counts().sort_index()
     print(f"\nCrosswalk {crosswalk_number:04}")
     print(f"Observed By:{document_jsons.iloc[0].get("observedBy")}")
     print(f"Average Wait Time: {round(st.mean(wait_times), 2)}")
