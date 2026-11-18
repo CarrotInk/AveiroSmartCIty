@@ -17,6 +17,7 @@ def convertDate(json_to_convert):
 def roadSegmentInfo(road_number):
         temp = road_segments.query("entityId=='urn:ngsi-ld:RoadSegment:1{:04}'".format(road_number))
         temp = temp.reset_index()
+        max_allowed_velocity = 0
 
         for i in range(len(temp['documentJson'])):
             data_dict = json.loads(temp['documentJson'][i])
@@ -27,12 +28,15 @@ def roadSegmentInfo(road_number):
                 if isinstance(val, dict): return float(val.get("$numberDouble", 0.0))
                 return val
 
+            print("Index: ", road_segments.query("_id=='{}'".format(temp["_id"][i]))["_id"].index.start + 2)
             print(convertDate(temp["eventTimestamp"][i]))
-            print("Max Allowed Velocity:", get_value("maxAllowedVelocity"))
-            print("Max Velocity:", get_value("maxVelocity"), "\n")
+            max_allowed_velocity = get_value("maxAllowedVelocity")
+            print("Max Velocity:", get_value("maxVelocity"))
+            print("Average Velocity Deviations:", get_value("averageVelocityStdDeviation"), "\n")
 
         print("\nRoad 1{:04}".format(road_number))
-        print("Rua:", json.loads(temp['documentJson'][0])["name"], "\n")
+        print("Rua:", json.loads(temp['documentJson'][0])["name"])
+        print("Max Allowed Velocity:", max_allowed_velocity, "\n")
 
 #=====================================================================================================================
 
@@ -41,9 +45,10 @@ def crossWalkInfo(crosswalk_number):
         temp = smart_crosswalk.query("entityId=='urn:ngsi-ld:SmartCrosswalk:{:04}'".format(crosswalk_number))
         temp = temp.reset_index()
 
-        for i in range(10):
+        for i in range(len(temp['documentJson'])):
             data_dict = json.loads(temp['documentJson'][i])
 
+            print("Index: ", smart_crosswalk.query("_id=='{}'".format(temp["_id"][i]))["_id"].index.start + 2)
             print(convertDate(temp["eventTimestamp"][i]))
             print("Traverse Time:", float(data_dict["traverse_time"]["$numberDouble"]))
             try: print("Wait Time:", float(data_dict["wait_time"]["$numberDouble"]), "\n")
@@ -54,7 +59,7 @@ def crossWalkInfo(crosswalk_number):
 
 #=====================================================================================================================
 while True:
-    option = int(input("Crosswalk Info (1)   |   Road Segments (2)   |   Exit (3)\n"))
+    option = int(input("Crosswalk Info (1)   |   Road Segments Info (2)   |   Exit (3)\n"))
     match option:
         case 1: crossWalkInfo(int(input("Which Crosswalk? ")))
         case 2: roadSegmentInfo(int(input("Which Road? ")))
