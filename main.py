@@ -1,5 +1,3 @@
-from tkinter import font
-
 import pandas as pd
 from datetime import datetime, timezone
 import statistics as st
@@ -45,9 +43,14 @@ def roadSegmentInfo(road_number, label):
         print("Max Velocity:", get_value(data_dict, "maxVelocity"))
         print("Average Velocity Deviations:",get_value(data_dict, "averageVelocityStdDeviation"),"\n")
 
-    print(f"\nRoad 1{road_number:04}")
-    print("Rua:", document_jsons.iloc[0].get("name"))
-    print("Max Allowed Velocity:", round((max_allowed_velocity * 3.6), 2), "\n")
+    print(f"\n===Road 1{road_number:04}===")
+    print(f"- Rua: {document_jsons.iloc[0].get("name")}\n")
+    print(f"- Max Allowed Velocity: {round((max_allowed_velocity * 3.6), 2)}\n")
+
+    label.config(text = f"\n===Road 1{road_number:04}===\n"
+                           f"- Rua: {document_jsons.iloc[0].get("name")}\n"
+                           f"- Max Allowed Velocity: {round((max_allowed_velocity * 3.6), 2)}"
+                           f"")
 
 #=====================================================================================================================
 
@@ -86,7 +89,7 @@ def crossWalkInfo(crosswalk_number, label):
     print(f"Average Wait Time: {round(st.mean(wait_times), 2)}")
     print(f"Average Traverse Time: {round(st.mean(traverse_times), 2)}\n")
 
-    label.configure(text = f"\n===Crosswalk {crosswalk_number:04}===\n"
+    label.config(text = f"\n===Crosswalk {crosswalk_number:04}===\n"
                            f"- Observed By:{document_jsons.iloc[0].get("observedBy")}\n"
                            f"- Average Wait Time: {round(st.mean(wait_times), 2)}\n"
                            f"- Average Traverse Time: {round(st.mean(traverse_times), 2)}")
