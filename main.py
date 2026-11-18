@@ -1,10 +1,13 @@
+from unittest import case
+
 import pandas as pd
 from datetime import datetime, timezone
 import json
 
 #==Load Data==========================================================================================================
-smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv')
+smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv',nrows=1000)
 road_segments = pd.read_csv('data/roadsegments_stats.csv', nrows=100000)
+smart_parking = pd.read_csv('data/smartparking.csv',nrows=1000)
 #=====================================================================================================================
 
 def convertDate(json_to_convert):
@@ -58,7 +61,20 @@ def roadSegmentInfo(road_number):
 
   print("Max Allowed Velocity:", max_allowed_velocity * 3.6, "\n")
 
-#=====================================================================================================================
+#===Parking==================================================================================================================
+def parkingInfo(parking_number):
+
+    temp = smart_parking.query("entityId == 'urn:ngsi-ld:ParkingSpot:{:04}'".format(parking_number))
+    temp = temp.reset_index()
+
+    for row_idx, row in enumerate(temp.itertuples()):
+
+        print("Index: ", smart_parking.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2)
+
+        data_dict = temp["documentJson"].apply(json.loads)
+
+        print("State Park:", get_value(data_dict, "state"))
+        print("Location Park:", get_value(data_dict, "location"))
 
 #===CrossWalks========================================================================================================
 def crossWalkInfo(crosswalk_number):
@@ -94,9 +110,10 @@ def crossWalkInfo(crosswalk_number):
 
 #=====================================================================================================================
 while True:
-    option = int(input("Crosswalk Info (1)   |   Road Segments Info (2)   |   Exit (3)\n"))
+    option = int(input("Crosswalk Info (1)   |   Road Segments Info (2)   |     Parking Status (3)      |   Exit (4)\n"))
     match option:
         case 1: crossWalkInfo(int(input("Which Crosswalk? ")))
         case 2: roadSegmentInfo(int(input("Which Road? ")))
-        case 3: break
+        case 3: parkingInfo(int(input("Which Parking? ")))
+        case 4: break
 
