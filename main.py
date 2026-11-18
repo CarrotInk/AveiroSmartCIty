@@ -110,10 +110,10 @@ def crossWalkInfo(crosswalk_number, label):
         elif wait_time and ("$intDouble" in wait_time):
             print("Wait Time:", int(wait_time["$intDouble"]), "")
 
-        wait_hour=wait_hour.append([date_time[row_idx].time(),wait_time])
+        wait_hour.append([date_time[row_idx].time(),wait_time])
 
 
-    average_wait_hour=data_dict["wait_time"].value_counts().sort_index()
+    #average_wait_hour=data_dict["wait_time"].value_counts().sort_index()
     print(f"\nCrosswalk {crosswalk_number:04}")
     print(f"Observed By:{document_jsons.iloc[0].get("observedBy")}")
     print(f"Average Wait Time: {round(st.mean(wait_times), 2)}")
