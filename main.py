@@ -1,16 +1,21 @@
+import re
 import pandas as pd
-import json
 from datetime import datetime, timezone
+import json
+import statistics as st
 
-smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv', usecols=['_id', 'entityId', 'eventTimestamp'])
+smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv', usecols=['entityId', 'eventTimestamp'])
 
 #-------------------------------------------------------------------------------------------------------------
 
 def crossWalkInfo(crosswalk_number):
         print("\nCrosswalk {:04}: ".format(crosswalk_number))
-        print(smart_crosswalk.query(
-            "entityId=='urn:ngsi-ld:SmartCrosswalk:{:04}'".format(crosswalk_number))
-              ["eventTimestamp"][1:10])
+        for i in range(10):
+            raw_value = smart_crosswalk['eventTimestamp'][i]
+            data = json.loads(raw_value)
+            milliseconds = int(data["$date"]["$numberLong"])
+            dt = datetime.fromtimestamp(milliseconds / 1000.0, tz=timezone.utc)
+            print(dt)
 
 def allCrosswalkInfo():
     for i in range(24):
