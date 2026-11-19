@@ -24,33 +24,6 @@ The project includes a small Tkinter interface for looking up road, parking, and
 - `Data available.txt` — sample records and fields available in the data.
 - `Hackathon_Tech_Week_2026.pdf` — hackathon reference material.
 
-## Getting started
-
-### Requirements
-
-- Python 3
-- `pandas`
-- `requests` and `folium` for the location/map experiment
-- Tkinter, which is commonly included with desktop Python installations
-
-Install the Python packages with:
-
-```bash
-python -m pip install pandas requests folium
-```
-
-### Run the prototype
-
-From the repository root, try the desktop interface with:
-
-```bash
-python main.py
-```
-
-The scripts expect to be run from the repository root so their relative `data/...` paths resolve. The location experiment uses an external IP-geolocation service and requires an internet connection. Review and adjust its output path before using it on a different machine.
-
-> **Prototype note:** This is hackathon-stage code. Some scripts are exploratory and may require fixes or configuration for your environment before they run successfully.
-
 ## Data notes
 
 The CSV records contain serialized JSON documents, including NGSI-LD-style entity IDs such as `RoadSegment`, `ParkingSpot`, and `SmartCrosswalk`. The sample file `Data available.txt` illustrates fields such as road geometry and speed, parking status, and crosswalk wait/traverse times. Treat the datasets as project inputs, and check their source, licensing, and update frequency before redistributing or using them for operational decisions.
@@ -61,4 +34,8 @@ Ideas, fixes, documentation, and improvements to the data exploration are welcom
 
 ## Acknowledgements
 
-Created as part of the **Aveiro City Hackathon / Tech Week 2026**. Add event, team, and data-provider acknowledgements here as they are confirmed.
+Created as part of the **Aveiro City Hackathon / Tech Week 2026** by the team:
+###H.D.S.
+- Henrique Romão
+- Diogo Caseiro
+- Simão Rocha
