@@ -6,7 +6,7 @@ import json
 
 #==Load Data==========================================================================================================
 smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv',nrows=1000)
-road_segments = pd.read_csv('data/roadsegments_stats.csv', nrows=100000)
+road_segments = pd.read_csv('data/roadsegments_stats.csv', nrows=1000)
 smart_parking = pd.read_csv('data/smartparking.csv',nrows=1000)
 #=====================================================================================================================
 
@@ -145,6 +145,7 @@ def roadsegment_clicked():
 def parking_clicked():
     parkingInfo(int(txt.get()), lbl)
 
+
 crosswalk_btn = tk.Button(root, text = "Crosswalks", command= crosswalk_clicked, justify="center")
 crosswalk_btn.pack(side='left', anchor='ne', expand=True, pady=False)
 crosswalk_btn.config(font=("Arial", 15))
@@ -157,7 +158,7 @@ roadsegment_btn = tk.Button(root, text = "Road Segments", command = roadsegment_
 roadsegment_btn.pack(side='right', anchor='nw', expand=True, pady=False)
 roadsegment_btn.config(font=("Arial", 15))
 
-lbl.place(relx=0.64, rely=0.15, anchor="ne")
+lbl.place(relx=0.5, rely=0.15, anchor="center")
 lbl.config(font=("Arial", 15))
 
 root.mainloop()
