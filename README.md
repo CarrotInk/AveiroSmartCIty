@@ -16,17 +16,17 @@ The project includes a small Tkinter interface for looking up road, parking, and
 
 - `main.py` — prototype desktop interface for querying road, parking, and crosswalk data.
 - `road_match.py` — experiment for finding the nearest road segment to a location.
-- `location.py` — IP-based location lookup and map-generation experiment.
+- `location_time.py` — IP-based location lookup and map-generation experiment.
 - `data/roadsegments_stats.csv` — road-segment records.
 - `data/smartparking.csv` — smart-parking records.
 - `data/smartcrosswalk.csv` — smart-crosswalk records.
 - `data/touriststats_transitions.csv` and `data/touriststats_visits.csv` — tourism-related datasets.
-- `Data available.txt` — sample records and fields available in the data.
+- `Data available.json` — sample records and fields available in the data.
 - `Hackathon_Tech_Week_2026.pdf` — hackathon reference material.
 
 ## Data notes
 
-The CSV records contain serialized JSON documents, including NGSI-LD-style entity IDs such as `RoadSegment`, `ParkingSpot`, and `SmartCrosswalk`. The sample file `Data available.txt` illustrates fields such as road geometry and speed, parking status, and crosswalk wait/traverse times. Treat the datasets as project inputs, and check their source, licensing, and update frequency before redistributing or using them for operational decisions.
+The CSV records contain serialized JSON documents, including NGSI-LD-style entity IDs such as `RoadSegment`, `ParkingSpot`, and `SmartCrosswalk`. The sample file `Data available.json` illustrates fields such as road geometry and speed, parking status, and crosswalk wait/traverse times. Treat the datasets as project inputs, and check their source, licensing, and update frequency before redistributing or using them for operational decisions.
 
 ## Contributing
 

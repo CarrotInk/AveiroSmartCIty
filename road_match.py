@@ -2,7 +2,7 @@ import json
 import math
 
 import pandas as pd
-from location import locationCoordinates
+from location_time import locationCoordinates
 
 EARTH_RADIUS_M = 6_371_000
 
