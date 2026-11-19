@@ -4,6 +4,8 @@ import statistics as st
 import tkinter as tk
 import json
 
+from road_match import nearest_road
+
 #==Load Data==========================================================================================================
 smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv',nrows=1000)
 road_segments = pd.read_csv('data/roadsegments_stats.csv', nrows=1000)
@@ -68,7 +70,7 @@ def parkingInfo(parking_number, label):
         data_dict = document_jsons[row.Index]
 
         print(f"State: {get_value(data_dict,'status')}")
-        print(f"Location Park: {get_value(data_dict, "location")}")
+        print(f"Location Park: {get_value(data_dict, "location")}\n")
 
         label.config(text=f"\n===Parking Slot {parking_number:04}===\n"
                           f"State: {get_value(data_dict,'status')}\n"
@@ -92,8 +94,6 @@ def crossWalkInfo(crosswalk_number, label):
         print(convertDate(row.eventTimestamp))
 
         date_time.append(convertDate(row.eventTimestamp))
-
-
         data_dict = document_jsons[row.Index]
 
         traverse_time = data_dict.get("traverse_time")
@@ -145,6 +145,9 @@ def roadsegment_clicked():
 def parking_clicked():
     parkingInfo(int(txt.get()), lbl)
 
+def nearest_clicked():
+    nearest_road(lbl)
+
 
 crosswalk_btn = tk.Button(root, text = "Crosswalks", command= crosswalk_clicked, justify="center")
 crosswalk_btn.pack(side='left', anchor='ne', expand=True, pady=False)
@@ -155,8 +158,12 @@ parking_btn.pack(side='left', anchor='nw', expand=False, pady=False)
 parking_btn.config(font=("Arial", 15))
 
 roadsegment_btn = tk.Button(root, text = "Road Segments", command = roadsegment_clicked, justify="center")
-roadsegment_btn.pack(side='right', anchor='nw', expand=True, pady=False)
+roadsegment_btn.pack(side='left', anchor='nw', expand=True, pady=False)
 roadsegment_btn.config(font=("Arial", 15))
+
+nearest_btn = tk.Button(root, text = "Nearest Road", command = nearest_clicked, justify="center")
+nearest_btn.pack(side='left', anchor='nw', expand=True, pady=False)
+nearest_btn.config(font=("Arial", 15))
 
 lbl.place(relx=0.5, rely=0.15, anchor="center")
 lbl.config(font=("Arial", 15))

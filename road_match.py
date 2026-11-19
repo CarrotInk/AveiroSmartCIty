@@ -120,7 +120,7 @@ def find_nearest_road(latitude, longitude, csv_path, max_distance_m=4000):
                     print(f"Skipping invalid road coordinates: {error}")
                     continue
 
-                if nearest is None or distance < nearest["distance_m"]:
+                if nearest is None or distance > nearest["distance_m"]:
                     nearest = {
                         "entityId": row.entityId,
                         "name": document.get("name"),
@@ -133,11 +133,17 @@ def find_nearest_road(latitude, longitude, csv_path, max_distance_m=4000):
     return nearest
 
 
-lat, long, *_ = locationCoordinates()
+def nearest_road(label):
+    lat, long, *_ = locationCoordinates()
 
-match = find_nearest_road(lat, long,"data/roadsegments_stats.csv",)
+    match = find_nearest_road(lat, long, "data/roadsegments_stats.csv", )
 
-if match:
-    print(f"Road: {match['name']} ({match['entityId']})")
-    print(f"Distance from road: {match['distance_m']:.1f} m")
-else: print("No road found nearby")
+    if match:
+        print(f"\nNearest Road: {match['name']} ({match['entityId']})")
+        label.config(text=f"\n- Nearest Road: {match['name']}\n"
+                          f"- Road Id: {match['entityId']}\n")
+    else:
+        print("No road found nearby")
+        label.config(text=f"\nNo road found nearby")
+
+

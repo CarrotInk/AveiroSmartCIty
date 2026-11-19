@@ -1,3 +1,5 @@
+from pprint import pprint
+
 import requests
 import folium
 import datetime
@@ -6,7 +8,7 @@ def locationCoordinates():
     try:
         response = requests.get('https://ipinfo.io')
         data = response.json()
-        print(data)
+        pprint(data)
         loc = data['loc'].split(',')
         lat, long = float(loc[0]), float(loc[1])
         city = data.get('city', 'Unknown')
@@ -32,5 +34,3 @@ def gps_locator():
 
     except:
         return False
-
-page = gps_locator()
