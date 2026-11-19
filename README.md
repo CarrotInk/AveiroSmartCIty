@@ -20,9 +20,8 @@ O programa no seu estado atual analisa o dataset recolhido de uma semana e usa u
 
 ## Acknowledgements
 
-Created as part of the **Aveiro City Hackathon / Tech Week 2026** by the team:
 Feito como projeto da hackathon **Aveiro City Hackathon / Tech Week 2026** pela equipa:
-### H.D.S.:
+**H.D.S.**:
 - Henrique Romão
 - Diogo Caseiro
 - Simão Rocha
