@@ -29,7 +29,7 @@ def get_value(data_dict, field):
 
 
 def roadSegmentInfo(road_number, label):
-    temp = road_segments.query("entityId=='urn:ngsi-ld:RoadSegment:1{:04}'".format(road_number))
+    temp = road_segments.query("entityId=='urn:ngsi-ld:RoadSegment:{:05}'".format(road_number))
     temp = temp.reset_index()
 
     max_allowed_velocity = 0
@@ -50,7 +50,7 @@ def roadSegmentInfo(road_number, label):
     print(f"- Rua: {document_jsons.iloc[0].get("name")}")
     print(f"- Max Allowed Velocity: {round((max_allowed_velocity * 3.6), 2)}\n")
 
-    label.config(text = f"\n===Road 1{road_number:04}===\n"
+    label.config(text = f"\n===Road {road_number:05}===\n"
                            f"- Rua: {document_jsons.iloc[0].get("name")}\n"
                            f"- Max Allowed Velocity: {round((max_allowed_velocity * 3.6), 2)}"
                            f"")
