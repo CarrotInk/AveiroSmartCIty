@@ -33,6 +33,47 @@
 
 
 
+  "Parking": {
+    "_id": {
+      "$oid": "6ae9eb866ba3d07c9060f55d"
+    },
+    "entityId": "urn:ngsi-ld:ParkingSpot:0136",
+    "entityType": "ParkingSpot",
+    "duration": {
+      "$numberInt": "0"
+    },
+    "refDevice": "urn:ngsi-ld:RoadSideUnit:0004",
+    "insertionTimestamp": {
+      "$date": {
+        "$numberLong": "1793715006000"
+      }
+    },
+    "eventTimestamp": {
+      "$date": {
+        "$numberLong": "1793715005000"
+      }
+    },
+    "status": "occupied",
+    "recvTime": {
+      "$date": {
+        "$numberLong": "1793715006290"
+      }
+    },
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        {
+          "$numberDouble": "-8.657724879"
+        },
+        {
+          "$numberDouble": "40.641350107"
+        }
+      ]
+    }
+  },
+
+
+
   "Road Segments": {
     "_id": {
       "$oid": "6ae9c3de6ba3d07c905a59e6"
@@ -80,86 +121,71 @@
         "$numberLong": "1793704879330"
       }
     },
-
     "startPoint": {
       "type": "Point",
-       "coordinates": [
-         {
-           "$numberDouble": "-8.6522345"
-          },
-          {
-            "$numberDouble": "40.637976"
-          }
-       ]
-     },
-   "endPoint": {
-      "type": "Point",
-        "coordinates": [
-         {
-           "$numberDouble": "-8.6532399"
-         },
-         {
-           "$numberDouble": "40.6371248"
-          }
-       ]
-      },
-   "location": {
-    "coordinates": [
-      [
+      "coordinates": [
         {
           "$numberDouble": "-8.6522345"
         },
         {
           "$numberDouble": "40.637976"
         }
-      ],
-      [
+      ]
+    },
+    "endPoint": {
+      "type": "Point",
+      "coordinates": [
         {
-          "$numberDouble": "-8.6524965"
+          "$numberDouble": "-8.6532399"
         },
         {
-          "$numberDouble": "40.6377619"
+          "$numberDouble": "40.6371248"
         }
-      ],
-      [
-        {
-          "$numberDouble": "-8.6526772"
-        },
-        {
-          "$numberDouble": "40.6376099"
-        }
-       ],
+      ]
+    },
+    "location": {
+      "coordinates": [
         [
-         {
-            "$numberDouble": "-8.6531185"
-         },
-         {
-           "$numberDouble": "40.6372087"
+          {
+            "$numberDouble": "-8.6522345"
+          },
+          {
+            "$numberDouble": "40.637976"
           }
-       ],
-       [
-         {
-           "$numberDouble": "-8.6532399"
+        ],
+        [
+          {
+            "$numberDouble": "-8.6524965"
+          },
+          {
+            "$numberDouble": "40.6377619"
+          }
+        ],
+        [
+          {
+            "$numberDouble": "-8.6526772"
+          },
+          {
+            "$numberDouble": "40.6376099"
+          }
+        ],
+        [
+          {
+            "$numberDouble": "-8.6531185"
+          },
+          {
+            "$numberDouble": "40.6372087"
+          }
+        ],
+        [
+          {
+            "$numberDouble": "-8.6532399"
           },
           {
             "$numberDouble": "40.6371248"
           }
-       ]
+        ]
       ],
-     "type": "LineString"
-  },
-
-
-  "Parking":{
-    "_id": {"$oid": "6ae9eb866ba3d07c9060f55d"},
-    "entityId": "urn:ngsi-ld:ParkingSpot:0136",
-    "entityType": "ParkingSpot",
-    "duration": {"$numberInt": "0"},
-    "refDevice": "urn:ngsi-ld:RoadSideUnit:0004",
-    "insertionTimestamp": {"$date": {"$numberLong": "1793715006000"}},
-    "eventTimestamp": {"$date": {"$numberLong": "1793715005000"}},
-    "status": "occupied",
-    "recvTime": {"$date": {"$numberLong": "1793715006290"}}},
-
-    "location": {"type": "Point", "coordinates": [{"$numberDouble": "-8.657724879"}, {"$numberDouble": "40.641350107"}]}
-}
+      "type": "LineString"
+    }
+}}

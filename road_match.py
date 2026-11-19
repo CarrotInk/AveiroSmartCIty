@@ -1,5 +1,6 @@
 import json
 import math
+from asyncio.windows_events import NULL
 
 import pandas as pd
 from location_time import locationCoordinates
@@ -142,8 +143,11 @@ def nearest_road(label):
         print(f"\nNearest Road: {match['name']} ({match['entityId']})")
         label.config(text=f"\n- Nearest Road: {match['name']}\n"
                           f"- Road Id: {match['entityId']}\n")
-    else:
-        print("No road found nearby")
-        label.config(text=f"\nNo road found nearby")
+
+        return match
+
+    print("No road found nearby")
+    label.config(text=f"\nNo road found nearby")
+    return {"entityId": NULL, "name": "No road found nearby", "distance_m": NULL, }
 
 

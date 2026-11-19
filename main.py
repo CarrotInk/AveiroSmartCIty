@@ -65,7 +65,7 @@ def parkingInfo(parking_number, label):
 
     for row_idx, row in enumerate(temp.itertuples()):
 
-        print("Index: ", smart_parking.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2)
+        print(f"===Index: {smart_parking.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2}===")
 
         data_dict = document_jsons[row.Index]
 
@@ -90,7 +90,7 @@ def crossWalkInfo(crosswalk_number, label):
     document_jsons = temp["documentJson"].apply(json.loads)
 
     for row_idx, row in enumerate(temp.itertuples()):
-        print("Index: ", smart_crosswalk.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2)
+        print(f"===Index: {smart_crosswalk.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2}===")
         print(convertDate(row.eventTimestamp))
 
         date_time.append(convertDate(row.eventTimestamp))
@@ -146,7 +146,7 @@ def parking_clicked():
     parkingInfo(int(txt.get()), lbl)
 
 def nearest_clicked():
-    nearest_road(lbl)
+    nearest_road_id = nearest_road(lbl)['entityId']
 
 
 crosswalk_btn = tk.Button(root, text = "Crosswalks", command= crosswalk_clicked, justify="center")
