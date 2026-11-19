@@ -14,7 +14,7 @@ O programa no seu estado atual analisa o dataset recolhido de uma semana e usa u
 ## Conteúdo do Repositório
 
 - `main.py` — Ficheiro principal, onde são analisados os dados do dataset e onde é feita a interface da app.
-- - `location_time.py` — Recolha de dados sobre a localização atual do utilizador.
+- `location_time.py` — Recolha de dados sobre a localização atual do utilizador.
 - `road_match.py` — Funções que utilizam a localização do location_time.pv para estimar a rua mais próxima do utilizador
 - `Data available.json` — Ficheiro complementar para ajudar a compreender os dados durante o desenvolvimento
 
