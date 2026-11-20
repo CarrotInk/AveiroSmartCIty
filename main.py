@@ -1,171 +1,396 @@
-import pandas as pd
-from datetime import datetime, timezone
+import json
 import statistics as st
 import tkinter as tk
-import json
+from datetime import datetime, timezone
+from tkinter import messagebox, ttk
+
+import pandas as pd
 
 from road_match import nearest_road
 
-#==Load Data==========================================================================================================
-smart_crosswalk = pd.read_csv('data/smartcrosswalk.csv',nrows=1000)
-road_segments = pd.read_csv('data/roadsegments_stats.csv', nrows=1000)
-smart_parking = pd.read_csv('data/smartparking.csv',nrows=1000)
-#=====================================================================================================================
+# Load data
+smart_crosswalk = pd.read_csv("data/smartcrosswalk.csv", nrows=1000)
+road_segments = pd.read_csv("data/roadsegments_stats.csv", nrows=1000)
+smart_parking = pd.read_csv("data/smartparking.csv", nrows=1000)
+
 
 def convertDate(json_to_convert):
     data = json.loads(json_to_convert)
     milliseconds = int(data["$date"]["$numberLong"])
-    dt = datetime.fromtimestamp(milliseconds / 1000.0, tz=timezone.utc)
-    return dt
+    return datetime.fromtimestamp(milliseconds / 1000.0, tz=timezone.utc)
 
-#===Road Segments====================================================================================================
+
 def get_value(data_dict, field):
-    val = data_dict.get(field)
-    if isinstance(val, list) and len(val) > 0:
-        val = val[0]
-    if isinstance(val, dict):
-        return float(val.get("$numberDouble", 0.0))
-    return val
+    value = data_dict.get(field)
+    if isinstance(value, list) and value:
+        value = value[0]
+    if isinstance(value, dict):
+        return float(value.get("$numberDouble", 0.0))
+    return value
 
 
-def roadSegmentInfo(road_number, label):
-    temp = road_segments.query("entityId=='urn:ngsi-ld:RoadSegment:{:05}'".format(road_number))
-    temp = temp.reset_index()
-
-    max_allowed_velocity = 0
-
-    document_jsons = temp["documentJson"].apply(json.loads)
-
-    for row_idx, row in enumerate(temp.itertuples()):
-        print("Index: ", road_segments.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2)
-        print(convertDate(row.eventTimestamp))
-
-        data_dict = document_jsons[row.Index]
-
-        max_allowed_velocity = get_value(data_dict, "maxAllowedVelocity")
-        print("Max Velocity:", get_value(data_dict, "maxVelocity"))
-        print("Average Velocity Deviations:",get_value(data_dict, "averageVelocityStdDeviation"),"\n")
-
-    print(f"\n===Road 1{road_number:04}===")
-    print(f"- Rua: {document_jsons.iloc[0].get("name")}")
-    print(f"- Max Allowed Velocity: {round((max_allowed_velocity * 3.6), 2)}\n")
-
-    label.config(text = f"\n===Road {road_number:05}===\n"
-                           f"- Rua: {document_jsons.iloc[0].get("name")}\n"
-                           f"- Max Allowed Velocity: {round((max_allowed_velocity * 3.6), 2)}"
-                           f"")
-
-#===Parking===========================================================================================================
-def parkingInfo(parking_number, label):
-
-    temp = smart_parking.query("entityId == 'urn:ngsi-ld:ParkingSpot:{:04}'".format(parking_number))
-    temp = temp.reset_index()
-
-    document_jsons = temp["documentJson"].apply(json.loads)
-
-    for row_idx, row in enumerate(temp.itertuples()):
-
-        print(f"===Index: {smart_parking.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2}===")
-
-        data_dict = document_jsons[row.Index]
-
-        print(f"State: {get_value(data_dict,'status')}")
-        print(f"Location Park: {get_value(data_dict, "location")}\n")
-
-        label.config(text=f"\n===Parking Slot {parking_number:04}===\n"
-                          f"State: {get_value(data_dict,'status')}\n"
-                          f"Location Park: {get_value(data_dict, "location")}\n"
-                          f"")
-
-#===CrossWalks========================================================================================================
-def crossWalkInfo(crosswalk_number, label):
-    temp = smart_crosswalk.query("entityId=='urn:ngsi-ld:SmartCrosswalk:{:04}'".format(crosswalk_number))
-    temp = temp.reset_index()
-
-    wait_times = []
-    traverse_times = []
-    date_time = []
-    wait_hour = []
-
-    document_jsons = temp["documentJson"].apply(json.loads)
-
-    for row_idx, row in enumerate(temp.itertuples()):
-        print(f"===Index: {smart_crosswalk.query("_id=='{}'".format(temp["_id"][row_idx]))["_id"].index.start + 2}===")
-        print(convertDate(row.eventTimestamp))
-
-        date_time.append(convertDate(row.eventTimestamp))
-        data_dict = document_jsons[row.Index]
-
-        traverse_time = data_dict.get("traverse_time")
-        if traverse_time and ("$numberDouble" in traverse_time):
-            print("Traverse Time:", float(traverse_time["$numberDouble"]), "")
-            traverse_times.append(float(traverse_time["$numberDouble"]))
-        elif traverse_time and ("$intDouble" in traverse_time):
-            print("Traverse Time:", int(traverse_time["$intDouble"]), "")
-
-        wait_time = data_dict.get("wait_time")
-        if wait_time and ("$numberDouble" in wait_time):
-            print("Wait Time:", float(wait_time["$numberDouble"]), "\n")
-            wait_times.append(float(wait_time["$numberDouble"]))
-        elif wait_time and ("$intDouble" in wait_time):
-            print("Wait Time:", int(wait_time["$intDouble"]), "")
-
-        wait_hour.append([date_time[row_idx].time(),wait_time])
+def get_rows(frame, entity_id):
+    rows = frame.query("entityId == @entity_id").reset_index(drop=True)
+    if rows.empty:
+        raise ValueError(f"No records found for {entity_id}")
+    return rows
 
 
-    #average_wait_hour=data_dict["wait_time"].value_counts().sort_index()
-    print(f"\nCrosswalk {crosswalk_number:04}")
-    print(f"Observed By:{document_jsons.iloc[0].get("observedBy")}")
-    print(f"Average Wait Time: {round(st.mean(wait_times), 2)}")
-    print(f"Average Traverse Time: {round(st.mean(traverse_times), 2)}\n")
-
-    label.config(text = f"\n===Crosswalk {crosswalk_number:04}===\n"
-                           f"- Observed By:{document_jsons.iloc[0].get("observedBy")}\n"
-                           f"- Average Wait Time: {round(st.mean(wait_times), 2)}\n"
-                           f"- Average Traverse Time: {round(st.mean(traverse_times), 2)}")
-
-#=====================================================================================================================
-root = tk.Tk()
-root.title("HDS's Amazing lil App")
-root.geometry('800x600')
-
-txt = tk.Entry(root, width=25)
-txt.pack(side='top', anchor='center', pady=5)
-txt.config(font=("Arial", 15))
-
-lbl = tk.Label(root, text = "", justify="left")
+def get_documents(rows):
+    return rows["documentJson"].apply(json.loads).tolist()
 
 
-def crosswalk_clicked():
-    crossWalkInfo(int(txt.get()), lbl)
+class SmartCityApp:
+    BG = "#F4F7FB"
+    CARD = "#FFFFFF"
+    NAVY = "#172B4D"
+    BLUE = "#2463EB"
+    MUTED = "#667085"
+    BORDER = "#DDE5EF"
 
-def roadsegment_clicked():
-    roadSegmentInfo(int(txt.get()), lbl)
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Aveiro Smart City")
+        self.root.geometry("900x600")
+        self.root.minsize(720, 500)
+        self.root.configure(bg=self.BG)
 
-def parking_clicked():
-    parkingInfo(int(txt.get()), lbl)
+        self.configure_styles()
+        self.build_ui()
 
-def nearest_clicked():
-    nearest_road_id = nearest_road(lbl)['entityId']
+    def configure_styles(self):
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+
+        style.configure("App.TFrame", background=self.BG)
+        style.configure("Card.TFrame", background=self.CARD)
+        style.configure(
+            "Title.TLabel",
+            background=self.BG,
+            foreground=self.NAVY,
+            font=("Segoe UI", 23, "bold"),
+        )
+        style.configure(
+            "Subtitle.TLabel",
+            background=self.BG,
+            foreground=self.MUTED,
+            font=("Segoe UI", 10),
+        )
+        style.configure(
+            "Section.TLabel",
+            background=self.CARD,
+            foreground=self.NAVY,
+            font=("Segoe UI", 13, "bold"),
+        )
+        style.configure(
+            "Field.TLabel",
+            background=self.CARD,
+            foreground=self.MUTED,
+            font=("Segoe UI", 9, "bold"),
+        )
+        style.configure(
+            "Value.TLabel",
+            background=self.CARD,
+            foreground=self.NAVY,
+            font=("Segoe UI", 11),
+        )
+        style.configure(
+            "Action.TButton",
+            font=("Segoe UI", 10, "bold"),
+            padding=(12, 10),
+        )
+
+    def build_ui(self):
+        page = ttk.Frame(self.root, style="App.TFrame", padding=(30, 24))
+        page.pack(fill="both", expand=True)
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(page, style="App.TFrame")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 22))
+
+        ttk.Label(
+            header,
+            text="Aveiro Smart City",
+            style="Title.TLabel",
+        ).pack(anchor="w")
+
+        ttk.Label(
+            header,
+            text="Mobility and infrastructure data viewer",
+            style="Subtitle.TLabel",
+        ).pack(anchor="w", pady=(4, 0))
+
+        content = ttk.Frame(page, style="App.TFrame")
+        content.grid(row=1, column=0, sticky="nsew")
+        content.columnconfigure(0, weight=0, minsize=250)
+        content.columnconfigure(1, weight=1)
+        content.rowconfigure(0, weight=1)
+
+        controls = ttk.Frame(content, style="Card.TFrame", padding=20)
+        controls.grid(row=0, column=0, sticky="nsew", padx=(0, 18))
+
+        ttk.Label(
+            controls,
+            text="Look up a record",
+            style="Section.TLabel",
+        ).pack(anchor="w")
+
+        ttk.Label(
+            controls,
+            text="Choose a category and enter its numeric ID.",
+            style="Subtitle.TLabel",
+            wraplength=210,
+        ).pack(anchor="w", pady=(6, 18))
+
+        ttk.Label(
+            controls,
+            text="CATEGORY",
+            style="Field.TLabel",
+        ).pack(anchor="w", pady=(0, 6))
+
+        self.category = tk.StringVar(value="Smart crosswalk")
+        category_box = ttk.Combobox(
+            controls,
+            textvariable=self.category,
+            state="readonly",
+            values=("Smart crosswalk", "Road segment", "Parking spot"),
+            font=("Segoe UI", 10),
+        )
+        category_box.pack(fill="x", pady=(0, 14), ipady=4)
+
+        ttk.Label(
+            controls,
+            text="RECORD ID",
+            style="Field.TLabel",
+        ).pack(anchor="w", pady=(0, 6))
+
+        self.record_id = tk.StringVar()
+        self.id_entry = ttk.Entry(
+            controls,
+            textvariable=self.record_id,
+            font=("Segoe UI", 12),
+        )
+        self.id_entry.pack(fill="x", pady=(0, 14), ipady=5)
+        self.id_entry.bind("<Return>", lambda _event: self.search())
+
+        ttk.Button(
+            controls,
+            text="Search",
+            style="Action.TButton",
+            command=self.search,
+        ).pack(fill="x", pady=(0, 8))
+
+        ttk.Separator(controls).pack(fill="x", pady=10)
+
+        ttk.Button(
+            controls,
+            text="Find nearest road",
+            style="Action.TButton",
+            command=self.find_nearest_road,
+        ).pack(fill="x")
+
+        self.status = tk.StringVar(value="Ready")
+        ttk.Label(
+            controls,
+            textvariable=self.status,
+            style="Subtitle.TLabel",
+            wraplength=210,
+        ).pack(anchor="w", side="bottom", pady=(18, 0))
+
+        result_card = ttk.Frame(content, style="Card.TFrame", padding=24)
+        result_card.grid(row=0, column=1, sticky="nsew")
+        result_card.columnconfigure(0, weight=1)
+
+        ttk.Label(
+            result_card,
+            text="Results",
+            style="Section.TLabel",
+        ).grid(row=0, column=0, sticky="w", pady=(0, 16))
+
+        self.result_body = ttk.Frame(result_card, style="Card.TFrame")
+        self.result_body.grid(row=1, column=0, sticky="new")
+        self.show_empty_state()
+
+        self.id_entry.focus_set()
+
+    def clear_results(self):
+        for widget in self.result_body.winfo_children():
+            widget.destroy()
+
+    def show_empty_state(self):
+        self.clear_results()
+
+        ttk.Label(
+            self.result_body,
+            text="Your results will appear here",
+            style="Value.TLabel",
+        ).pack(anchor="w", pady=(12, 4))
+
+        ttk.Label(
+            self.result_body,
+            text="Choose a data type and enter its ID to view the latest information.",
+            style="Subtitle.TLabel",
+            wraplength=480,
+            justify="left",
+        ).pack(anchor="w")
+
+    def show_results(self, title, fields):
+        self.clear_results()
+
+        ttk.Label(
+            self.result_body,
+            text=title,
+            style="Section.TLabel",
+        ).pack(anchor="w", pady=(0, 14))
+
+        for name, value in fields:
+            row = ttk.Frame(self.result_body, style="Card.TFrame")
+            row.pack(fill="x", pady=7)
+
+            ttk.Label(
+                row,
+                text=name.upper(),
+                style="Field.TLabel",
+            ).pack(anchor="w")
+
+            ttk.Label(
+                row,
+                text=str(value),
+                style="Value.TLabel",
+                wraplength=500,
+                justify="left",
+            ).pack(anchor="w", pady=(3, 0))
+
+        self.status.set("Information loaded successfully")
+
+    def search(self):
+        raw_id = self.record_id.get().strip()
+
+        if not raw_id.isdigit():
+            messagebox.showwarning(
+                "Invalid ID",
+                "Enter a numeric record ID.",
+                parent=self.root,
+            )
+            self.id_entry.focus_set()
+            return
+
+        number = int(raw_id)
+
+        try:
+            if self.category.get() == "Smart crosswalk":
+                self.show_crosswalk(number)
+            elif self.category.get() == "Road segment":
+                self.show_road_segment(number)
+            else:
+                self.show_parking(number)
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+            self.status.set("No matching record")
+            messagebox.showerror(
+                "Unable to load record",
+                str(error),
+                parent=self.root,
+            )
+
+    def show_crosswalk(self, number):
+        entity_id = f"urn:ngsi-ld:SmartCrosswalk:{number:04}"
+        rows = get_rows(smart_crosswalk, entity_id)
+        documents = get_documents(rows)
+
+        wait_times = []
+        traverse_times = []
+
+        for document in documents:
+            wait = document.get("wait_time")
+            if isinstance(wait, dict):
+                if "$numberDouble" in wait:
+                    wait_times.append(float(wait["$numberDouble"]))
+                elif "$intDouble" in wait:
+                    wait_times.append(float(wait["$intDouble"]))
+
+            traverse = document.get("traverse_time")
+            if isinstance(traverse, dict):
+                if "$numberDouble" in traverse:
+                    traverse_times.append(float(traverse["$numberDouble"]))
+                elif "$intDouble" in traverse:
+                    traverse_times.append(float(traverse["$intDouble"]))
+
+        latest = documents[-1]
+        average_wait = round(st.mean(wait_times), 2) if wait_times else "No data"
+        average_traverse = round(st.mean(traverse_times), 2) if traverse_times else "No data"
+
+        self.show_results(
+            "Smart crosswalk",
+            [
+                ("Crosswalk ID", f"{number:04}"),
+                ("Observed by", get_value(latest, "observedBy") or "Not available"),
+                ("Average wait time", f"{average_wait} seconds"),
+                ("Average traverse time", f"{average_traverse} seconds"),
+                ("Records analyzed", len(documents)),
+            ],
+        )
+
+    def show_road_segment(self, number):
+        entity_id = f"urn:ngsi-ld:RoadSegment:{number:05}"
+        rows = get_rows(road_segments, entity_id)
+        latest = get_documents(rows)[-1]
+
+        speed = get_value(latest, "maxAllowedVelocity")
+        try:
+            speed_text = f"{round(float(speed) * 3.6, 2)} km/h"
+        except (TypeError, ValueError):
+            speed_text = "Not available"
+
+        self.show_results(
+            "Road segment",
+            [
+                ("Road ID", f"{number:05}"),
+                ("Street", get_value(latest, "name") or "Not available"),
+                ("Maximum allowed speed", speed_text),
+            ],
+        )
+
+    def show_parking(self, number):
+        entity_id = f"urn:ngsi-ld:ParkingSpot:{number:04}"
+        rows = get_rows(smart_parking, entity_id)
+        latest = get_documents(rows)[-1]
+
+        self.show_results(
+            "Parking spot",
+            [
+                ("Spot ID", f"{number:04}"),
+                ("Status", get_value(latest, "status") or "Not available"),
+                ("Location", get_value(latest, "location") or "Not available"),
+            ],
+        )
+
+    def find_nearest_road(self):
+        try:
+            temporary_label = tk.Label(self.root)
+            match = nearest_road(temporary_label)
+
+            if not isinstance(match, dict) or "entityId" not in match:
+                raise ValueError("No nearest-road result was returned.")
+
+            self.show_results(
+                "Nearest road",
+                [("Road entity ID", match["entityId"])],
+            )
+        except Exception as error:
+            self.status.set("Nearest-road lookup failed")
+            messagebox.showerror(
+                "Unable to find nearest road",
+                str(error),
+                parent=self.root,
+            )
 
 
-crosswalk_btn = tk.Button(root, text = "Crosswalks", command= crosswalk_clicked, justify="center")
-crosswalk_btn.pack(side='left', anchor='ne', expand=True, pady=False)
-crosswalk_btn.config(font=("Arial", 15))
+def main():
+    root = tk.Tk()
+    SmartCityApp(root)
+    root.mainloop()
 
-parking_btn = tk.Button(root, text = "Parking Slot", command = parking_clicked, justify="center")
-parking_btn.pack(side='left', anchor='nw', expand=False, pady=False)
-parking_btn.config(font=("Arial", 15))
 
-roadsegment_btn = tk.Button(root, text = "Road Segments", command = roadsegment_clicked, justify="center")
-roadsegment_btn.pack(side='left', anchor='nw', expand=True, pady=False)
-roadsegment_btn.config(font=("Arial", 15))
-
-nearest_btn = tk.Button(root, text = "Nearest Road", command = nearest_clicked, justify="center")
-nearest_btn.pack(side='left', anchor='nw', expand=True, pady=False)
-nearest_btn.config(font=("Arial", 15))
-
-lbl.place(relx=0.5, rely=0.15, anchor="center")
-lbl.config(font=("Arial", 15))
-
-root.mainloop()
+if __name__ == "__main__":
+    main()
