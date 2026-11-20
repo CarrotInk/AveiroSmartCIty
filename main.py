@@ -8,11 +8,11 @@ import pandas as pd
 
 from road_match import nearest_road
 
-# Load data
+#===Load data=================================================================================================
 smart_crosswalk = pd.read_csv("data/smartcrosswalk.csv", nrows=1000)
 road_segments = pd.read_csv("data/roadsegments_stats.csv", nrows=1000)
 smart_parking = pd.read_csv("data/smartparking.csv", nrows=1000)
-
+#=============================================================================================================
 
 def convertDate(json_to_convert):
     data = json.loads(json_to_convert)
@@ -40,6 +40,7 @@ def get_documents(rows):
     return rows["documentJson"].apply(json.loads).tolist()
 
 
+#=============================================================================================================
 class SmartCityApp:
     BG = "#F4F7FB"
     CARD = "#FFFFFF"
@@ -375,7 +376,7 @@ class SmartCityApp:
 
             self.show_results(
                 "Nearest road",
-                [("Road entity ID", match["entityId"])],
+                [("Road Name", match["name"]), ("Road entity ID", match["entityId"])],
             )
         except Exception as error:
             self.status.set("Nearest-road lookup failed")
@@ -384,7 +385,7 @@ class SmartCityApp:
                 str(error),
                 parent=self.root,
             )
-
+#=============================================================================================================
 
 def main():
     root = tk.Tk()
