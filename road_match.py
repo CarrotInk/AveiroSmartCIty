@@ -5,8 +5,14 @@ import os
 import sys
 from functools import lru_cache
 from pathlib import Path
+from pathlib import Path
+
+import pandas as pd
 
 EARTH_RADIUS_M = 6_371_000
+# Ficheiro pequeno de referência (1 linha por segmento). O roadsegments_stats.csv tem 1,68 milhões
+# de linhas e repete os mesmos 1436 segmentos, por isso não compensa lê-lo para achar a rua mais próxima.
+ROAD_CSV = Path(__file__).resolve().parent / "data" / "reference-entities" / "RoadSegment.csv"
 
 
 def build_compact_roads(source_path, output_path):
@@ -156,11 +162,39 @@ def find_nearest_road(
         )
 
     nearest = None
+def _iter_roads(csv_path):
+    """Dá (entityId, name, lines) de cada segmento, seja do RoadSegment.csv de referência
+    (colunas entityId, name, location) ou do roadsegments_stats.csv (com documentJson)."""
+    columns = pd.read_csv(csv_path, nrows=0).columns
 
+    if "documentJson" in columns:
+        seen = set()
+        for row in pd.read_csv(csv_path, usecols=["entityId", "documentJson"]).itertuples(index=False):
+            if row.entityId in seen:          # o mesmo segmento repete-se milhares de vezes
+                continue
+            lines, document = road_coordinates(row.documentJson)
+            if lines:
+                seen.add(row.entityId)
+                yield row.entityId, document.get("name"), lines
+    else:
+        for row in pd.read_csv(csv_path, usecols=["entityId", "name", "location"]).itertuples(index=False):
+            try:
+                coordinates = json.loads(row.location).get("coordinates")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if coordinates:
+                yield row.entityId, (None if pd.isna(row.name) else row.name), [coordinates]
+
+
+def find_nearest_road(latitude, longitude, csv_path=ROAD_CSV, max_distance_m=4000):
+    nearest = None
+
+    for entity_id, name, lines in _iter_roads(csv_path):
     for entity_id, document, lines in _load_roads(csv_path):
         for line in lines:
             if not isinstance(line, (list, tuple)) or len(line) < 2:
                 continue
+
             for start, end in zip(line, line[1:]):
                 try:
                     distance = nearest_point_on_segment_m(
@@ -171,17 +205,40 @@ def find_nearest_road(
                     continue
 
                 if nearest is None or distance < nearest["distance_m"]:
+                if nearest is None or distance < nearest["distance_m"]:   # era ">" (escolhia a mais longe)
                     nearest = {
                         "entityId": entity_id,
                         "name": document.get("name"),
+                        "entityId": entity_id,
+                        "name": name,
                         "distance_m": distance,
                     }
 
     if nearest is None or nearest["distance_m"] > max_distance_m:
         return None
+
     return nearest
 
 
+def nearest_road(label=None, csv_path=ROAD_CSV):
+    from location_time import locationCoordinates     # import tardio: find_nearest_road não precisa dele
+
+    lat, long, *_ = locationCoordinates()
+
+    match = find_nearest_road(lat, long, csv_path)
+
+    if match:
+        print(f"\nNearest Road: {match['name']} ({match['entityId']})")
+        if label is not None:
+            label.config(text=f"\n- Nearest Road: {match['name']}\n"
+                              f"- Road Id: {match['entityId']}\n")
+
+        return match
+
+    print("No road found nearby")
+    if label is not None:
+        label.config(text=f"\nNo road found nearby")
+    return {"entityId": None, "name": "No road found nearby", "distance_m": None}
 if __name__ == "__main__":
     build_compact_roads(
         "data/roadsegments_stats.csv",
