@@ -370,7 +370,7 @@ class SmartCityApp:
 
         ctk.CTkLabel(title_header, text="Aveiro Smart City", text_color=self.NAVY,
                      font=self._font(27, "bold")).pack(anchor="w")
-        ctk.CTkLabel(title_header, text="Visualização de dados sobre mobilidade", text_color=self.MUTED,
+        ctk.CTkLabel(title_header, text="Visualização de dados sobre mobilidade - by H.D.S.", text_color=self.MUTED,
                      font=self._font(12)).pack(anchor="w", pady=(4, 0))
 
         header = ctk.CTkFrame(page, fg_color="transparent")
