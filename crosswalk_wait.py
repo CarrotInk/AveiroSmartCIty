@@ -3,12 +3,11 @@ from datetime import datetime, timezone
 import pandas as pd
 
 
-MIN_RECORDS = 30   # abaixo disto avisa que o valor é pouco fiável
+MIN_RECORDS = 30
 MIN_DAYS = 3
 
 
 def parse_timestamp_utc(raw_value):
-    #Converte o campo eventTimestamp (Extended JSON ou número/string) para datetime UTC.
     if pd.isna(raw_value):
         return None
     try:
@@ -26,10 +25,9 @@ def parse_timestamp_utc(raw_value):
 
 
 def parse_numeric_field(raw_value):
-    #Extrai o valor float de campos Extended JSON (ex: {'$numberDouble': '8.005'}) ou numéricos.
     if pd.isna(raw_value):
         return None
-    if isinstance(raw_value, dict):          # ex: {"$numberDouble": "8.005"} já vindo de json.loads
+    if isinstance(raw_value, dict):
         for key in ("$numberDouble", "$numberInt", "$numberLong"):
             if key in raw_value:
                 return float(raw_value[key])
@@ -53,7 +51,6 @@ def parse_numeric_field(raw_value):
 
 
 def extract_wait_time(row):
-    #Obtém wait_time diretamente da coluna ou dentro de documentJson.
     if "wait_time" in row and pd.notna(row["wait_time"]):
         val = parse_numeric_field(row["wait_time"])
         if val is not None:
@@ -71,7 +68,6 @@ def extract_wait_time(row):
 
 
 def load_crosswalk_data(csv_path="data/smartcrosswalk.csv"):
-    #Carrega apenas as colunas necessárias de smartcrosswalk.csv e prepara timestamps e wait_time.
     header_cols = pd.read_csv(csv_path, nrows=0).columns.tolist()
     needed_cols = [c for c in ["entityId", "eventTimestamp", "wait_time", "documentJson"] if c in header_cols]
 
@@ -80,13 +76,11 @@ def load_crosswalk_data(csv_path="data/smartcrosswalk.csv"):
     df = df.dropna(subset=["dt_utc"]).copy()
 
     df["wait_time_sec"] = df.apply(extract_wait_time, axis=1)
-    # Converter para minutos desde a meia-noite (0 a 1439) para comparar horários independentemente do dia
     df["minutes_of_day"] = df["dt_utc"].dt.hour * 60 + df["dt_utc"].dt.minute + df["dt_utc"].dt.second / 60.0
     return df
 
 
 def format_minutes_hhmm(total_minutes):
-    #Formata minutos desde a meia-noite (com wrap-around de 24h) como HH:MM.
     wrapped = int(round(total_minutes)) % (24 * 60)
     hours = wrapped // 60
     minutes = wrapped % 60
@@ -94,22 +88,18 @@ def format_minutes_hhmm(total_minutes):
 
 
 def is_in_time_window(series_minutes, target_minutes, window_half_width=15):
-    #Verifica se cada timestamp (em minutos do dia) está dentro de [target - 15 min; target + 15 min], lidando com meia-noite.
     start_min = target_minutes - window_half_width
     end_min = target_minutes + window_half_width
 
     if start_min < 0:
-        # Ex: 00:05 -> [23:50; 00:20]
         return (series_minutes >= (24 * 60 + start_min)) | (series_minutes <= end_min)
     elif end_min >= 24 * 60:
-        # Ex: 23:55 -> [23:40; 00:10]
         return (series_minutes >= start_min) | (series_minutes <= (end_min - 24 * 60))
     else:
         return (series_minutes >= start_min) & (series_minutes <= end_min)
 
 
 def average_wait_time_by_time(df, crosswalk_number, time_str):
-    #Calcula a média do wait_time numa passadeira no intervalo [hora - 15 min; hora + 15 min].
     try:
         parsed_time = datetime.strptime(time_str.strip(), "%H:%M")
     except ValueError:

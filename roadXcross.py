@@ -1,26 +1,3 @@
-"""
-roadXcross - ligação ruas <-> passadeiras e aviso de trânsito (ATCLL, Aveiro).
-
-Uso como módulo (no main):
-    import roadXcross
-
-    roadXcross.ensure_ready()                       # só constrói o que ainda não existir
-    avisos = roadXcross.get_warnings(segment_id="urn:ngsi-ld:RoadSegment:10956")
-    avisos = roadXcross.get_warnings(street="Avenida 25 de Abril", hour=8)
-    for a in avisos:
-        print(roadXcross.format_warning(a, lang="en"))
-
-Cada aviso é um dicionário:
-    crosswalk, smartcrosswalk, road_name, hour, level ("Livre"/"Moderado"/"Intenso"/"Sem dados"),
-    avg_wait_s, speed_ratio, avg_speed_kmh  (None quando não há dados fiáveis)
-
-Uso na linha de comandos (ou sem argumentos para abrir o menu):
-    python roadXcross.py links
-    python roadXcross.py profile --roads data/roadsegments_stats.csv
-    python roadXcross.py warn --street "Avenida 25 de Abril" --hour 8
-
-As horas são UTC (== hora de Aveiro em novembro). Só precisa de pandas e numpy.
-"""
 import argparse
 import difflib
 import json
@@ -41,21 +18,18 @@ ROADS_CSV = EVENTS_DIR / "roadsegments_stats.csv"
 LINKS_CSV = BASE_DIR / "crosswalk_road_links.csv"
 PROFILE_CSV = BASE_DIR / "crosswalk_hourly_profile.csv"
 
-MAX_DIST_M = 30        # raio de procura de segmentos à volta da passadeira
-FALLBACK_DIST_M = 15   # se nenhum segmento tiver o nome certo, usa só os que estão colados
-WAIT_CAP_S = 120       # esperas acima disto são tratadas como outliers (máx. nos dados: 343 s)
-MAX_SPEED_MPS = 60     # acima disto é lixo (o V2X devolve 16383 quando não há velocidade)
-MIN_SAMPLES = 5        # mínimo de registos por hora para confiar na média
-CAMERA_IN_KMH = False  # o PDF diz km/h, mas nos dados as câmaras estão na mesma escala do radar (m/s).
-                       # build_profile imprime uma verificação: se a câmara aparecer muito abaixo dos
-                       # outros sensores, confirma isto com o ficheiro completo.
+MAX_DIST_M = 30
+FALLBACK_DIST_M = 15
+WAIT_CAP_S = 120
+MAX_SPEED_MPS = 60
+MIN_SAMPLES = 5
+CAMERA_IN_KMH = False
 
 LEVELS = ["Livre", "Moderado", "Intenso"]
 
 
 # ------------------- leitura do Extended JSON (MongoDB) ----------------------
 def _flat(v):
-    """Desembrulha $date, $numberDouble, $numberInt, $numberLong e $oid."""
     if isinstance(v, dict):
         if "$date" in v:
             d = v["$date"]
@@ -85,8 +59,8 @@ def load(path, keep=None):
 
 # ------------------------------ geometria -----------------------------------
 LAT0 = 40.64
-KX = 111320 * np.cos(np.radians(LAT0))   # metros por grau de longitude
-KY = 110540                              # metros por grau de latitude
+KX = 111320 * np.cos(np.radians(LAT0))
+KY = 110540
 
 
 def _xy(coords):
@@ -117,7 +91,6 @@ def _tokens(name):
 
 
 def _segment_names(raw):
-    """O campo name dos segmentos pode ser texto simples ou uma lista JSON em texto."""
     if pd.isna(raw):
         return []
     raw = str(raw)
@@ -140,7 +113,6 @@ def _names_match(a, b):
 
 # ------------------------------ 1) links ------------------------------------
 def build_links():
-    """Liga cada passadeira aos segmentos de estrada à volta e grava crosswalk_road_links.csv."""
     sc = pd.read_csv(REF_DIR / "SmartCrosswalk.csv")
     cw = pd.read_csv(REF_DIR / "Crosswalk.csv").set_index("entityId")
     rs = pd.read_csv(REF_DIR / "RoadSegment.csv")
@@ -189,7 +161,6 @@ def _crosswalk_waits():
 
 
 def _road_speeds(segment_ids, path, chunksize=100_000):
-    """Lê o ficheiro grande aos bocados e só faz parse JSON dos segmentos que interessam."""
     keep = set(segment_ids)
     out, bad = [], 0
     for chunk in pd.read_csv(path, usecols=["entityId", "documentJson"], chunksize=chunksize):
@@ -221,7 +192,6 @@ def _road_speeds(segment_ids, path, chunksize=100_000):
 
 
 def build_profile(roads_path=None):
-    """Perfil por passadeira e hora (espera dos peões + velocidade dos carros) -> crosswalk_hourly_profile.csv."""
     links = pd.read_csv(LINKS_CSV)
     used = links[links["use_for_alert"]]
 
@@ -240,11 +210,9 @@ def build_profile(roads_path=None):
         prof["avg_speed_mps"] = prof["speed_ratio"] = np.nan
         prof["n_vehicles"] = 0
 
-    # horas com poucos registos não são fiáveis: ficam sem valor (nem aparecem no aviso)
     prof.loc[prof["n_wait"].fillna(0) < MIN_SAMPLES, "avg_wait_s"] = np.nan
     prof.loc[prof["n_vehicles"].fillna(0) < MIN_SAMPLES, ["avg_speed_mps", "speed_ratio"]] = np.nan
 
-    # níveis (0 = livre, 1 = moderado, 2 = intenso)
     ok = prof["n_wait"].fillna(0) >= MIN_SAMPLES
     q50, q85 = prof.loc[ok, "avg_wait_s"].quantile([0.50, 0.85])
     prof["wait_level"] = np.where(~ok, np.nan, np.select(
@@ -266,13 +234,10 @@ def build_profile(roads_path=None):
 
 # ------------------------- 3) API para o main -------------------------------
 def is_ready():
-    """True se os dois CSV (links e perfil) já existem."""
     return LINKS_CSV.exists() and PROFILE_CSV.exists()
 
 
 def ensure_ready(roads_path=None, rebuild=False):
-    """Constrói só o que falta. O perfil demora (segundos sem estradas, minutos com o ficheiro grande),
-    por isso convém correr isto uma vez antes de abrir a interface."""
     if rebuild or not LINKS_CSV.exists():
         build_links()
     if rebuild or not PROFILE_CSV.exists():
@@ -282,12 +247,10 @@ def ensure_ready(roads_path=None, rebuild=False):
 
 
 def reload():
-    """Esquece as tabelas em memória (chamado automaticamente depois de reconstruir)."""
     _tables.cache_clear()
 
 
 def hour_now():
-    """Hora atual em UTC (a mesma referência do perfil)."""
     return datetime.now(timezone.utc).hour
 
 
@@ -324,9 +287,6 @@ def _warning(cw, hour, prof, road_name):
 
 
 def get_warnings(segment_id=None, street=None, hour=None):
-    """Avisos das passadeiras ligadas a um segmento (segment_id) e/ou a uma rua (street).
-    Se o segmento não tiver passadeiras, tenta pelo nome da rua. `hour` por defeito é a hora atual (UTC).
-    Devolve uma lista de dicionários (vazia se não houver passadeiras monitorizadas)."""
     used, prof, names = _tables()
     hour = hour_now() if hour is None else int(hour)
 
@@ -351,7 +311,6 @@ _TEXT = {
 
 
 def format_warning(w, lang="pt"):
-    """Texto de uma linha para um aviso devolvido por get_warnings (lang = 'pt' ou 'en')."""
     t = _TEXT[lang]
     head = f"{t['cw']} {w['crosswalk']}"
     if w["level"] == "Sem dados":
@@ -365,7 +324,6 @@ def format_warning(w, lang="pt"):
 
 
 def warn(street, hour):
-    """Compatibilidade com a versão antiga: lista de textos para uma rua e hora."""
     ws = get_warnings(street=street, hour=hour)
     return [format_warning(w) for w in ws] or [f"Sem passadeiras monitorizadas em '{street}'."]
 
@@ -395,7 +353,7 @@ def _menu():
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    sub = ap.add_subparsers(dest="cmd")          # sem comando -> abre o menu
+    sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("links")
     p = sub.add_parser("profile"); p.add_argument("--roads", help="roadsegments_stats.csv")
     w = sub.add_parser("warn"); w.add_argument("--street", required=True); w.add_argument("--hour", type=int, required=True)
