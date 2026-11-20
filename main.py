@@ -3,7 +3,8 @@ import statistics as st
 import tkinter as tk
 import threading
 from datetime import datetime, timezone
-from tkinter import messagebox, ttk
+from tkinter import messagebox
+
 import customtkinter as ctk
 
 import pandas as pd
@@ -16,7 +17,7 @@ ctk.set_default_color_theme("blue")
 
 #===Load data=================================================================================================
 smart_crosswalk = pd.read_csv("data/smartcrosswalk.csv")
-road_segments = pd.read_csv("data/roadsegments_stats.csv")
+road_segments = pd.read_csv("data/roadsegments_stats.csv", nrows=1000)
 smart_parking = pd.read_csv("data/smartparking.csv")
 #=============================================================================================================
 
@@ -58,172 +59,167 @@ class SmartCityApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Aveiro Smart City")
-        self.root.geometry("900x600")
-        self.root.minsize(720, 500)
-        self.root.configure(bg=self.BG)
-
-        self.configure_styles()
+        self.root.geometry("1000x680")
+        self.root.minsize(760, 540)
+        self.root.configure(fg_color=self.BG)
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
         self.build_ui()
 
-    def configure_styles(self):
-        style = ttk.Style(self.root)
-        style.theme_use("clam")
-
-        style.configure(
-            "App.TFrame",
-            background=self.BG
-        )
-        style.configure(
-            "Card.TFrame",
-            background=self.CARD
-        )
-        style.configure(
-            "Title.TLabel",
-            background=self.BG,
-            foreground=self.NAVY,
-            font=("Segoe UI", 23, "bold"),
-        )
-        style.configure(
-            "Subtitle.TLabel",
-            background=self.BG,
-            foreground=self.MUTED,
-            font=("Segoe UI", 10),
-        )
-        style.configure(
-            "Section.TLabel",
-            background=self.CARD,
-            foreground=self.NAVY,
-            font=("Segoe UI", 13, "bold"),
-        )
-        style.configure(
-            "Field.TLabel",
-            background=self.CARD,
-            foreground=self.MUTED,
-            font=("Segoe UI", 9, "bold"),
-        )
-        style.configure(
-            "Value.TLabel",
-            background=self.CARD,
-            foreground=self.NAVY,
-            font=("Segoe UI", 11),
-        )
-        style.configure(
-            "Action.TButton",
-            font=("Segoe UI", 10, "bold"),
-            padding=(12, 10),
-        )
-
     def build_ui(self):
-        page = ttk.Frame(self.root, style="App.TFrame", padding=(30, 24))
-        page.pack(fill="both", expand=True)
-        page.columnconfigure(0, weight=1)
-        page.rowconfigure(1, weight=1)
+        page = ctk.CTkFrame(self.root, fg_color="transparent", corner_radius=0)
+        page.grid(row=0, column=0, sticky="nsew", padx=28, pady=24)
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(1, weight=1)
 
-        header = ttk.Frame(page, style="App.TFrame")
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 22))
+        header = ctk.CTkFrame(page, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
 
-        ttk.Label(
+        ctk.CTkLabel(
             header,
             text="Aveiro Smart City",
-            style="Title.TLabel",
+            text_color=self.NAVY,
+            font=ctk.CTkFont(family="Segoe UI", size=27, weight="bold"),
         ).pack(anchor="w")
 
-        ttk.Label(
+        ctk.CTkLabel(
             header,
             text="Visualização de dados sobre mobilidade",
-            style="Subtitle.TLabel",
+            text_color=self.MUTED,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
         ).pack(anchor="w", pady=(4, 0))
 
-        content = ttk.Frame(page, style="App.TFrame")
+        content = ctk.CTkFrame(page, fg_color="transparent")
         content.grid(row=1, column=0, sticky="nsew")
-        content.columnconfigure(0, weight=0, minsize=250)
-        content.columnconfigure(1, weight=1)
-        content.rowconfigure(0, weight=1)
+        content.grid_columnconfigure(0, weight=0, minsize=260)
+        content.grid_columnconfigure(1, weight=1)
+        content.grid_rowconfigure(0, weight=1)
 
-        controls = ttk.Frame(content, style="Card.TFrame", padding=20)
+        controls = ctk.CTkFrame(
+            content,
+            fg_color=self.CARD,
+            corner_radius=20,
+            border_width=1,
+            border_color=self.BORDER,
+        )
         controls.grid(row=0, column=0, sticky="nsew", padx=(0, 18))
 
-        ttk.Label(
+        ctk.CTkLabel(
             controls,
             text="Pesquisa um registo",
-            style="Section.TLabel",
-        ).pack(anchor="w")
+            text_color=self.NAVY,
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+        ).pack(anchor="w", padx=20, pady=(22, 0))
 
-        ttk.Label(
+        ctk.CTkLabel(
             controls,
             text="Escolha uma categoria e insira o id do elemento",
-            style="Subtitle.TLabel",
+            text_color=self.MUTED,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
             wraplength=210,
-        ).pack(anchor="w", pady=(6, 18))
+            justify="left",
+        ).pack(anchor="w", padx=20, pady=(6, 22))
 
-        ttk.Label(
+        ctk.CTkLabel(
             controls,
             text="CATEGORIA",
-            style="Field.TLabel",
-        ).pack(anchor="w", pady=(0, 6))
+            text_color=self.MUTED,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+        ).pack(anchor="w", padx=20, pady=(0, 7))
 
-        self.category = tk.StringVar(value="Smart crosswalk")
-        category_box = ttk.Combobox(
+        category_box = ctk.CTkComboBox(
             controls,
-            textvariable=self.category,
-            state="readonly",
             values=("Smart crosswalk", "Road segment", "Parking spot"),
-            font=("Segoe UI", 10),
+            state="readonly",
+            height=40,
+            corner_radius=11,
+            border_color=self.BORDER,
+            button_color=self.BLUE,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
         )
-        category_box.pack(fill="x", pady=(0, 14), ipady=4)
+        self.category = category_box
+        category_box.pack(fill="x", padx=20, pady=(0, 18))
 
-        ttk.Label(
+        ctk.CTkLabel(
             controls,
             text="RECORD ID",
-            style="Field.TLabel",
-        ).pack(anchor="w", pady=(0, 6))
+            text_color=self.MUTED,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+        ).pack(anchor="w", padx=20, pady=(0, 7))
 
         self.record_id = tk.StringVar()
-        self.id_entry = ttk.Entry(
+        self.id_entry = ctk.CTkEntry(
             controls,
             textvariable=self.record_id,
-            font=("Segoe UI", 12),
+            height=42,
+            corner_radius=11,
+            border_color=self.BORDER,
+            font=ctk.CTkFont(family="Segoe UI", size=13),
+            placeholder_text="Enter numeric ID",
         )
-        self.id_entry.pack(fill="x", pady=(0, 14), ipady=5)
+        self.id_entry.pack(fill="x", padx=20, pady=(0, 16))
         self.id_entry.bind("<Return>", lambda _event: self.search())
 
-        ttk.Button(
+        ctk.CTkButton(
             controls,
             text="Procurar",
-            style="Action.TButton",
             command=self.search,
-        ).pack(fill="x", pady=(0, 8))
+            height=42,
+            corner_radius=12,
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+        ).pack(fill="x", padx=20, pady=(0, 10))
 
-        ttk.Separator(controls).pack(fill="x", pady=10)
+        ctk.CTkFrame(controls, height=1, fg_color=self.BORDER).pack(
+            fill="x", padx=20, pady=8
+        )
 
-        self.nearest_road_button = ttk.Button(
+        self.nearest_road_button = ctk.CTkButton(
             controls,
             text="Rua mais próxima",
-            style="Action.TButton",
             command=self.find_nearest_road,
+            height=42,
+            corner_radius=12,
+            fg_color="#EAF0FF",
+            hover_color="#DCE6FF",
+            text_color=self.BLUE,
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
         )
-        self.nearest_road_button.pack(fill="x")
+        self.nearest_road_button.pack(fill="x", padx=20, pady=(8, 0))
 
         self.status = tk.StringVar(value="Ready")
-        ttk.Label(
+        ctk.CTkLabel(
             controls,
             textvariable=self.status,
-            style="Subtitle.TLabel",
+            text_color=self.MUTED,
+            font=ctk.CTkFont(family="Segoe UI", size=10),
             wraplength=210,
-        ).pack(anchor="w", side="bottom", pady=(18, 0))
+            justify="left",
+        ).pack(anchor="w", side="bottom", padx=20, pady=20)
 
-        result_card = ttk.Frame(content, style="Card.TFrame", padding=24)
+        result_card = ctk.CTkFrame(
+            content,
+            fg_color=self.CARD,
+            corner_radius=20,
+            border_width=1,
+            border_color=self.BORDER,
+        )
         result_card.grid(row=0, column=1, sticky="nsew")
-        result_card.columnconfigure(0, weight=1)
+        result_card.grid_columnconfigure(0, weight=1)
+        result_card.grid_rowconfigure(1, weight=1)
 
-        ttk.Label(
+        ctk.CTkLabel(
             result_card,
             text="Resultado",
-            style="Section.TLabel",
-        ).grid(row=0, column=0, sticky="w", pady=(0, 16))
+            text_color=self.NAVY,
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", padx=24, pady=(22, 12))
 
-        self.result_body = ttk.Frame(result_card, style="Card.TFrame")
-        self.result_body.grid(row=1, column=0, sticky="new")
+        self.result_body = ctk.CTkScrollableFrame(
+            result_card,
+            fg_color="transparent",
+            corner_radius=12,
+        )
+        self.result_body.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
         self.show_empty_state()
 
         self.id_entry.focus_set()
@@ -235,46 +231,55 @@ class SmartCityApp:
     def show_empty_state(self):
         self.clear_results()
 
-        ttk.Label(
+        ctk.CTkLabel(
             self.result_body,
             text="O resultado aparecerá aqui",
-            style="Value.TLabel",
-        ).pack(anchor="w", pady=(12, 4))
+            text_color=self.NAVY,
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+        ).pack(anchor="w", padx=10, pady=(18, 5))
 
-        ttk.Label(
+        ctk.CTkLabel(
             self.result_body,
             text="Escolha um tipo de dados e insira o seu ID",
-            style="Subtitle.TLabel",
+            text_color=self.MUTED,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
             wraplength=480,
             justify="left",
-        ).pack(anchor="w")
+        ).pack(anchor="w", padx=10)
 
     def show_results(self, title, fields):
         self.clear_results()
 
-        ttk.Label(
+        ctk.CTkLabel(
             self.result_body,
             text=title,
-            style="Section.TLabel",
-        ).pack(anchor="w", pady=(0, 14))
+            text_color=self.NAVY,
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+        ).pack(anchor="w", padx=10, pady=(8, 16))
 
         for name, value in fields:
-            row = ttk.Frame(self.result_body, style="Card.TFrame")
-            row.pack(fill="x", pady=7)
+            row = ctk.CTkFrame(
+                self.result_body,
+                fg_color="#F7F9FC",
+                corner_radius=12,
+            )
+            row.pack(fill="x", padx=6, pady=5)
 
-            ttk.Label(
+            ctk.CTkLabel(
                 row,
                 text=name.upper(),
-                style="Field.TLabel",
-            ).pack(anchor="w")
+                text_color=self.MUTED,
+                font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            ).pack(anchor="w", padx=14, pady=(11, 0))
 
-            ttk.Label(
+            ctk.CTkLabel(
                 row,
                 text=str(value),
-                style="Value.TLabel",
+                text_color=self.NAVY,
+                font=ctk.CTkFont(family="Segoe UI", size=12),
                 wraplength=500,
                 justify="left",
-            ).pack(anchor="w", pady=(3, 0))
+            ).pack(anchor="w", padx=14, pady=(3, 11))
 
         self.status.set("Informação carregada com sucesso")
 
@@ -444,7 +449,7 @@ class SmartCityApp:
 #=============================================================================================================
 
 def main():
-    root = tk.Tk()
+    root = ctk.CTk()
     SmartCityApp(root)
     root.mainloop()
 
