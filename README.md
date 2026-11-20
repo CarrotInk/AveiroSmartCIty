@@ -18,13 +18,6 @@ O programa no seu estado atual analisa o dataset recolhido de uma semana e usa u
 - `road_match.py` — Funções que utilizam a localização do location_time.pv para estimar a rua mais próxima do utilizador
 - `Data available.json` — Ficheiro complementar para ajudar a compreender os dados durante o desenvolvimento
 
-## Preparar dados das estradas
-
-O ficheiro `data/roadsegments_stats.csv` pode ser muito grande. Antes de usar a pesquisa
-da estrada mais próxima pela primeira vez, execute `python road_match.py` na pasta do
-projeto. O comando cria `data/roads_unique.csv`, com uma geometria por estrada; a
-aplicação reutiliza e mantém em cache estes dados durante a execução.
-
 ## Acknowledgements
 
 Feito como projeto da hackathon **Aveiro City Hackathon / Tech Week 2026** pela equipa:

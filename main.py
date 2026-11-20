@@ -325,7 +325,7 @@ class SmartCityApp:
 
         ctk.CTkLabel(
             map_card,
-            text="Mapa das passadeiras e ruas próximas",
+            text="Mapa Interativo",
             text_color=self.NAVY,
             font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
         ).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 10))

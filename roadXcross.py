@@ -241,8 +241,6 @@ def ensure_ready(roads_path=None, rebuild=False):
     if rebuild or not LINKS_CSV.exists():
         build_links()
     if rebuild or not PROFILE_CSV.exists():
-        if roads_path is None and ROADS_CSV.exists():
-            roads_path = ROADS_CSV
         build_profile(roads_path)
 
 
