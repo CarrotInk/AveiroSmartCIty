@@ -269,6 +269,7 @@ class SmartCityApp:
         self._apply_theme_palette()
         self.last_result = None
         self.current_map_features = None
+        self.current_map_fit_bounds = False
         self.route_busy = False
         self.wait_data = None
         self.parking_data = None
@@ -334,7 +335,10 @@ class SmartCityApp:
         if self.last_result is not None:
             self.show_results(*self.last_result)
         if self.current_map_features is not None:
-            self.show_map_features(self.current_map_features)
+            self.show_map_features(
+                self.current_map_features,
+                fit_bounds=self.current_map_fit_bounds,
+            )
         self.status.set(status)
 
     # --- pequenos auxiliares de interface ---
@@ -655,6 +659,12 @@ class SmartCityApp:
         if notes:
             fields.append(("Notas", "\n".join(notes)))
 
+        features = [
+            {"kind": "road", "position": path, "label": step["street"]}
+            for step in route["steps"]
+            for path in _road_paths(step["segment_id"])
+        ]
+        self.show_map_features(features, fit_bounds=True)
         self.show_results("Rota mais rápida de carro", fields)
 
     # --- rua mais próxima ---
@@ -896,8 +906,9 @@ class SmartCityApp:
         )
 
     # --- mapa ---
-    def show_map_features(self, features):
+    def show_map_features(self, features, fit_bounds=False):
         self.current_map_features = features
+        self.current_map_fit_bounds = fit_bounds
         self.map_widget.delete_all_marker()
         self.map_widget.delete_all_path()
 
@@ -914,7 +925,13 @@ class SmartCityApp:
                     self.map_widget.set_path(path, width=3)
                     points.extend(path)
 
-        if points:
+        if points and fit_bounds:
+            latitudes, longitudes = zip(*points)
+            self.map_widget.fit_bounding_box(
+                (max(latitudes), min(longitudes)),
+                (min(latitudes), max(longitudes)),
+            )
+        elif points:
             center_lat = sum(point[0] for point in points) / len(points)
             center_lon = sum(point[1] for point in points) / len(points)
             self.map_widget.set_position(center_lat, center_lon)
