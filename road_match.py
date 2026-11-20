@@ -1,11 +1,38 @@
+import csv
 import json
 import math
-from asyncio.windows_events import NULL
-
-import pandas as pd
-from location_time import locationCoordinates
+import os
+import sys
+from functools import lru_cache
+from pathlib import Path
 
 EARTH_RADIUS_M = 6_371_000
+
+
+def build_compact_roads(source_path, output_path):
+    """Stream the large source file into a compact one-row-per-road CSV."""
+    seen_entity_ids = set()
+    output_path = Path(output_path)
+    temporary_path = output_path.with_name(output_path.name + ".tmp")
+
+    try:
+        with open(source_path, newline="", encoding="utf-8") as source:
+            csv.field_size_limit(sys.maxsize)
+            reader = csv.DictReader(source)
+            with open(temporary_path, "w", newline="", encoding="utf-8") as output:
+                writer = csv.writer(output)
+                writer.writerow(("entityId", "documentJson"))
+                for row in reader:
+                    entity_id = row.get("entityId")
+                    document_json = row.get("documentJson")
+                    if entity_id and entity_id not in seen_entity_ids and document_json:
+                        seen_entity_ids.add(entity_id)
+                        writer.writerow((entity_id, document_json))
+
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
 
 def haversine_m(lat1, lon1, lat2, lon2):
     lat1, lat2 = math.radians(lat1), math.radians(lat2)
@@ -82,6 +109,9 @@ def road_coordinates(document_json):
     except (TypeError, json.JSONDecodeError):
         return None, {}
 
+    if not isinstance(document, dict):
+        return None, {}
+
     location = document.get("location", {})
 
     if isinstance(location, dict):
@@ -101,53 +131,60 @@ def road_coordinates(document_json):
     return None, document
 
 
-def find_nearest_road(latitude, longitude, csv_path, max_distance_m=4000):
-    roads = pd.read_csv(csv_path,usecols=["entityId", "documentJson"])
+@lru_cache(maxsize=1)
+def _load_roads(csv_path):
+    roads = []
+    csv.field_size_limit(sys.maxsize)
+    with open(csv_path, newline="", encoding="utf-8") as source:
+        for row in csv.DictReader(source):
+            lines, document = road_coordinates(row["documentJson"])
+            if lines:
+                roads.append((row["entityId"], document, lines))
+    return roads
+
+
+def find_nearest_road(
+    latitude,
+    longitude,
+    csv_path="data/roads_unique.csv",
+    max_distance_m=4000,
+):
+    csv_path = str(Path(csv_path).resolve())
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(
+            f"Compact road data not found: {csv_path}. "
+            "Run road_match.py once to build it from data/roadsegments_stats.csv."
+        )
+
     nearest = None
 
-    for row in roads.itertuples(index=False):
-        lines, document = road_coordinates(row.documentJson)
-        if not lines:
-            continue
-
+    for entity_id, document, lines in _load_roads(csv_path):
         for line in lines:
             if not isinstance(line, (list, tuple)) or len(line) < 2:
                 continue
-
             for start, end in zip(line, line[1:]):
                 try:
-                    distance = nearest_point_on_segment_m(latitude, longitude, start, end)
+                    distance = nearest_point_on_segment_m(
+                        latitude, longitude, start, end
+                    )
                 except (TypeError, ValueError, KeyError) as error:
                     print(f"Skipping invalid road coordinates: {error}")
                     continue
 
-                if nearest is None or distance > nearest["distance_m"]:
+                if nearest is None or distance < nearest["distance_m"]:
                     nearest = {
-                        "entityId": row.entityId,
+                        "entityId": entity_id,
                         "name": document.get("name"),
                         "distance_m": distance,
                     }
 
     if nearest is None or nearest["distance_m"] > max_distance_m:
         return None
-
     return nearest
 
 
-def nearest_road(label):
-    lat, long, *_ = locationCoordinates()
-
-    match = find_nearest_road(lat, long, "data/roadsegments_stats.csv", )
-
-    if match:
-        print(f"\nNearest Road: {match['name']} ({match['entityId']})")
-        label.config(text=f"\n- Nearest Road: {match['name']}\n"
-                          f"- Road Id: {match['entityId']}\n")
-
-        return match
-
-    print("No road found nearby")
-    label.config(text=f"\nNo road found nearby")
-    return {"entityId": NULL, "name": "No road found nearby", "distance_m": NULL, }
-
-
+if __name__ == "__main__":
+    build_compact_roads(
+        "data/roadsegments_stats.csv",
+        "data/roads_unique.csv",
+    )

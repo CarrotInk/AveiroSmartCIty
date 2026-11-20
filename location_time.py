@@ -1,23 +1,20 @@
-from pprint import pprint
-
 import requests
 import folium
 import datetime
 
 def locationCoordinates():
+    response = requests.get("https://ipinfo.io", timeout=10)
+    response.raise_for_status()
+    data = response.json()
+
     try:
-        response = requests.get("https://ipinfo.io", timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        pprint(data)
-        loc = data['loc'].split(',')
-        lat, long = float(loc[0]), float(loc[1])
-        city = data.get('city', 'Unknown')
-        state = data.get('region', 'Unknown')
-        return lat, long, city, state
-    except:
-        print("Internet Not avialable")
-        exit()
+        latitude, longitude = map(float, data["loc"].split(","))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("Location service returned invalid coordinates.") from error
+
+    city = data.get("city", "Unknown")
+    state = data.get("region", "Unknown")
+    return latitude, longitude, city, state
 
 
 def gps_locator():

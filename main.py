@@ -1,12 +1,14 @@
 import json
 import statistics as st
 import tkinter as tk
+import threading
 from datetime import datetime, timezone
 from tkinter import messagebox, ttk
 
 import pandas as pd
 
-from road_match import nearest_road
+from location_time import locationCoordinates
+from road_match import find_nearest_road as lookup_nearest_road
 
 #===Load data=================================================================================================
 smart_crosswalk = pd.read_csv("data/smartcrosswalk.csv", nrows=1000)
@@ -63,8 +65,14 @@ class SmartCityApp:
         style = ttk.Style(self.root)
         style.theme_use("clam")
 
-        style.configure("App.TFrame", background=self.BG)
-        style.configure("Card.TFrame", background=self.CARD)
+        style.configure(
+            "App.TFrame",
+            background=self.BG
+        )
+        style.configure(
+            "Card.TFrame",
+            background=self.CARD
+        )
         style.configure(
             "Title.TLabel",
             background=self.BG,
@@ -184,12 +192,13 @@ class SmartCityApp:
 
         ttk.Separator(controls).pack(fill="x", pady=10)
 
-        ttk.Button(
+        self.nearest_road_button = ttk.Button(
             controls,
             text="Find nearest road",
             style="Action.TButton",
             command=self.find_nearest_road,
-        ).pack(fill="x")
+        )
+        self.nearest_road_button.pack(fill="x")
 
         self.status = tk.StringVar(value="Ready")
         ttk.Label(
@@ -367,40 +376,68 @@ class SmartCityApp:
         )
 
     def find_nearest_road(self):
-        try:
-            temporary_label = tk.Label(self.root)
-            match = nearest_road(temporary_label)
+        self.nearest_road_button.configure(state="disabled")
+        self.status.set("Finding nearest road...")
+        threading.Thread(target=self._lookup_nearest_road, daemon=True).start()
 
-            if not isinstance(match, dict) or not match.get("entityId"):
-                self.show_results("Nearest road", [("Result", "No road found nearby")])
+    def _lookup_nearest_road(self):
+        try:
+            latitude, longitude, *_ = locationCoordinates()
+            match = lookup_nearest_road(latitude, longitude)
+            if not match:
+                self.root.after(0, self._show_nearest_road_result, None, None, None)
                 return
 
+            # The detail view currently keeps the first 1,000 road observations in memory.
             now = datetime.now().astimezone()
             velocities = []
-
             rows = road_segments[road_segments["entityId"] == match["entityId"]]
-            for _, row in rows.iterrows():
-                observed_at = convertDate(row["eventTimestamp"]).astimezone(now.tzinfo)
+            for row in rows.itertuples(index=False):
+                observed_at = convertDate(row.eventTimestamp).astimezone(now.tzinfo)
                 if observed_at.hour == now.hour:
-                    velocity = get_value(json.loads(row["documentJson"]), "averageVelocity")
+                    velocity = get_value(
+                        json.loads(row.documentJson), "averageVelocity"
+                    )
                     if velocity is not None:
                         velocities.append(float(velocity))
 
-            average_velocity = (f"{st.mean(velocities) * 3.6:.2f} km/h" if velocities else "No data for this hour")
-
-            self.show_results(
-                "Nearest road",
-                [("Road Name", match["name"]),
-                 ("Road entity ID", match["entityId"]),
-                 ("Average velocity", average_velocity),],
+            average_velocity = (
+                f"{st.mean(velocities) * 3.6:.2f} km/h"
+                if velocities
+                else "No data for this hour"
+            )
+            self.root.after(
+                0, self._show_nearest_road_result, match, average_velocity, None
             )
         except Exception as error:
+            self.root.after(
+                0, self._show_nearest_road_result, None, None, error
+            )
+
+    def _show_nearest_road_result(self, match, average_velocity, error):
+        self.nearest_road_button.configure(state="normal")
+        if error is not None:
             self.status.set("Nearest-road lookup failed")
             messagebox.showerror(
                 "Unable to find nearest road",
                 str(error),
                 parent=self.root,
             )
+            return
+
+        if not match:
+            self.show_results("Nearest road", [("Result", "No road found nearby")])
+            return
+
+        self.show_results(
+            "Nearest road",
+            [
+                ("Road Name", match["name"]),
+                ("Road entity ID", match["entityId"]),
+                ("Distance", f"{match['distance_m']:.1f} m"),
+                ("Average velocity", average_velocity),
+            ],
+        )
 #=============================================================================================================
 
 def main():
