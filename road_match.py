@@ -8,8 +8,6 @@ import pandas as pd
 import roadXcross
 
 EARTH_RADIUS_M = 6_371_000
-# Ficheiro pequeno de referência (1 linha por segmento). O roadsegments_stats.csv tem 1,68 milhões
-# de linhas e repete os mesmos 1436 segmentos, por isso não compensa lê-lo para achar a rua mais próxima.
 ROAD_CSV = Path(__file__).resolve().parent / "data" / "reference-entities" / "RoadSegment.csv"
 
 
@@ -112,7 +110,6 @@ def road_coordinates(document_json):
 
 
 def _first_name(raw):
-    """O campo name pode ser texto simples, vazio (NaN) ou uma lista JSON em texto: devolve o 1.º nome."""
     if raw is None or (isinstance(raw, float) and math.isnan(raw)):
         return None
     if isinstance(raw, list):
@@ -128,15 +125,13 @@ def _first_name(raw):
 
 
 def _iter_roads(csv_path):
-    """Dá (entityId, name, lines) de cada segmento, seja do RoadSegment.csv de referência
-    (colunas entityId, name, location) ou do roadsegments_stats.csv (com documentJson)."""
     columns = pd.read_csv(csv_path, nrows=0, sep=None, engine="python", encoding="utf-8-sig").columns
     columns = [str(c).strip() for c in columns]
 
     if "documentJson" in columns:
         seen = set()
         for row in pd.read_csv(csv_path, usecols=["entityId", "documentJson"]).itertuples(index=False):
-            if row.entityId in seen:          # o mesmo segmento repete-se milhares de vezes
+            if row.entityId in seen:
                 continue
             lines, document = road_coordinates(row.documentJson)
             if lines:
@@ -154,7 +149,6 @@ def _iter_roads(csv_path):
 
 @lru_cache(maxsize=2)
 def _load_roads(csv_path):
-    """Lê o ficheiro uma única vez (as pesquisas seguintes usam a memória)."""
     return tuple(_iter_roads(csv_path))
 
 
@@ -187,7 +181,7 @@ def find_nearest_road(latitude, longitude, csv_path=ROAD_CSV, max_distance_m=400
 
 
 def nearest_road(label=None, csv_path=ROAD_CSV):
-    from location_time import locationCoordinates     # import tardio: find_nearest_road não precisa dele
+    from location_time import locationCoordinates
 
     lat, long, *_ = locationCoordinates()
 

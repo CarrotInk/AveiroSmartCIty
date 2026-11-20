@@ -27,7 +27,6 @@ REFERENCE_DIR = DATA_DIR / "reference-entities"
 # ===Dados========================================================================================================
 @lru_cache(maxsize=1)
 def _load_map_sources():
-    """Tabelas pequenas de referência (passadeiras e ruas), lidas uma só vez."""
     crosswalks = roadXcross.read_ref_csv(REFERENCE_DIR / "SmartCrosswalk.csv").set_index("entityId")
     roads = roadXcross.read_ref_csv(REFERENCE_DIR / "RoadSegment.csv").set_index("entityId")
     return crosswalks[~crosswalks.index.duplicated()], roads[~roads.index.duplicated()]
@@ -35,21 +34,17 @@ def _load_map_sources():
 
 @lru_cache(maxsize=None)
 def _events_table(filename):
-    """Ficheiros de eventos (grandes): só se leem quando são precisos e só as colunas necessárias.
-    (Antes o roadsegments_stats.csv era lido com nrows=1000, o que dava resultados errados.)"""
     return roadXcross.read_csv_safe(DATA_DIR / filename, usecols=["entityId", "documentJson"])
 
 
 @lru_cache(maxsize=1)
 def _speed_table():
-    """Velocidades médias por segmento e hora (cache do fastest_route, não relê o ficheiro grande)."""
     segments = fastest_route.load_segments()
     speeds, _ = fastest_route.load_speeds_and_waits(segments.index)
     return speeds
 
 
 def get_value(data_dict, field):
-    """Valor de um campo de um documento já "achatado" (ver get_documents); listas dão o 1.º elemento."""
     value = data_dict.get(field)
     if isinstance(value, list) and value:
         value = value[0]
@@ -68,12 +63,10 @@ def get_rows(frame, entity_id):
 
 
 def get_documents(rows):
-    """Converte o documentJson e desembrulha o Extended JSON ({"$numberDouble": ...}) para números normais."""
     return [roadXcross._flat(json.loads(s)) for s in rows["documentJson"]]
 
 
 def latest_document(documents):
-    """Documento mais recente (pelo eventTimestamp; se não houver, o último do ficheiro)."""
     floor = pd.Timestamp("1970-01-01", tz="UTC")
 
     def key(doc):
@@ -103,7 +96,6 @@ def _polygon_center(location_json):
 
 
 def _road_paths(road_id):
-    """Linhas (lista de (lat, lon)) de um segmento de estrada."""
     _, roads = _load_map_sources()
     if road_id not in roads.index:
         return []
@@ -149,7 +141,6 @@ def _map_features(crosswalk_ids):
 
 
 def road_speed_text(segment_id, hour):
-    """Velocidade média da rua à hora (UTC) indicada; se não houver dados, usa o último valor registado."""
     try:
         speeds = _speed_table()
         rows = speeds[(speeds["segment_id"] == segment_id) & (speeds["hour"] == hour)]
@@ -189,8 +180,6 @@ def crosswalk_fields(number):
 
 
 def road_segment_fields(number):
-    # Os dados de uma rua (nome, limite) estão no RoadSegment.csv de referência, que é pequeno;
-    # assim não é preciso ler o roadsegments_stats.csv (1,68 milhões de linhas).
     entity_id = f"urn:ngsi-ld:RoadSegment:{number:05}"
     _, roads = _load_map_sources()
     if entity_id not in roads.index:
@@ -273,7 +262,7 @@ class SmartCityApp:
         self.route_busy = False
         self.wait_data = None
         self.parking_data = None
-        try:                                       # carrega o mapa uma vez (ms); dá a lista de ruas
+        try:
             self.segments = fastest_route.load_segments()
             self.streets = fastest_route.list_streets(self.segments)
         except Exception as error:
@@ -341,7 +330,6 @@ class SmartCityApp:
             )
         self.status.set(status)
 
-    # --- pequenos auxiliares de interface ---
     def _font(self, size, weight="normal"):
         return ctk.CTkFont(family="Segoe UI", size=size, weight=weight)
 
@@ -406,7 +394,6 @@ class SmartCityApp:
         content.grid_columnconfigure(2, weight=1)
         content.grid_rowconfigure(0, weight=1)
 
-        # Os controlos são muitos: ficam numa coluna com scroll.
         controls = ctk.CTkScrollableFrame(content, fg_color=self.CARD, corner_radius=20,
                                           border_width=1, border_color=self.BORDER, width=250)
         controls.grid(row=0, column=0, sticky="nsew", padx=(0, 18))
@@ -442,25 +429,20 @@ class SmartCityApp:
 
         self._separator(controls)
 
-        # --- espera na passadeira ---
         self.wait_time_entry = self._entry(controls, "Hora UTC (HH:MM)", pady=(4, 6))
         self.wait_button = self._button(controls, "Analisar espera da passadeira", self.analyze_wait)
 
         self._separator(controls)
 
-        # --- avisos da rua ---
         self.street_entry = self._entry(controls, "Nome da rua", pady=(4, 6))
         self.street_entry.bind("<Return>", lambda _event: self.show_street_warnings())
         self.warning_button = self._button(controls, "Avisos da rua", self.show_street_warnings)
 
         self._separator(controls)
 
-        # --- rota mais rápida ---
         ctk.CTkLabel(controls, text="Rota mais rápida (de carro)", text_color=self.NAVY,
                      font=self._font(14, "bold")).pack(anchor="w", padx=20, pady=(0, 8))
 
-        # Campos de texto (a pesquisa aceita nomes parciais, sem acentos, e sugere alternativas):
-        # uma lista com centenas de ruas não cabe num menu do customtkinter.
         self._caption(controls, "RUA DE ORIGEM")
         self.route_from = self._entry(controls, "Ex.: Rua de Ovar")
         self._caption(controls, "RUA DE DESTINO")
@@ -474,8 +456,6 @@ class SmartCityApp:
         self.status = tk.StringVar(value="Pronto")
         ctk.CTkLabel(controls, textvariable=self.status, text_color=self.MUTED, font=self._font(10),
                      wraplength=210, justify="left").pack(anchor="w", padx=20, pady=(8, 14))
-
-        # --- resultados ---
         result_card = ctk.CTkFrame(content, fg_color=self.CARD, corner_radius=20,
                                    border_width=1, border_color=self.BORDER)
         result_card.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
@@ -488,7 +468,6 @@ class SmartCityApp:
         self.result_body = ctk.CTkScrollableFrame(result_card, fg_color="transparent", corner_radius=12)
         self.result_body.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
 
-        # --- mapa ---
         map_card = ctk.CTkFrame(content, fg_color=self.CARD, corner_radius=20,
                                 border_width=1, border_color=self.BORDER)
         map_card.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
@@ -513,7 +492,6 @@ class SmartCityApp:
         self.show_empty_state()
         self.id_entry.focus_set()
 
-    # --- resultados ---
     def clear_results(self):
         for widget in self.result_body.winfo_children():
             widget.destroy()
@@ -549,7 +527,6 @@ class SmartCityApp:
 
         self.status.set("Informação carregada com sucesso")
 
-    # --- pesquisa por ID ---
     def search(self):
         raw_id = self.id_entry.get().strip()
 
@@ -583,7 +560,6 @@ class SmartCityApp:
             return
         self.show_results(title, fields)
 
-    # --- rota mais rápida ---
     def find_route(self):
         if self.route_busy:
             return
