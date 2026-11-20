@@ -12,6 +12,7 @@ from tkintermapview import TkinterMapView
 
 import crosswalk_wait
 import fastest_route
+import parking_availabiality as parking_availability
 import roadXcross
 from location_time import locationCoordinates
 from road_match import find_nearest_road as lookup_nearest_road
@@ -53,6 +54,10 @@ def get_value(data_dict, field):
     if isinstance(value, list) and value:
         value = value[0]
     return value
+
+
+def _short_parking_id(entity_id):
+    return str(entity_id).rsplit(":", 1)[-1]
 
 
 def get_rows(frame, entity_id):
@@ -243,6 +248,7 @@ class SmartCityApp:
 
         self.route_busy = False
         self.wait_data = None
+        self.parking_data = None
         try:                                       # carrega o mapa uma vez (ms); dá a lista de ruas
             self.segments = fastest_route.load_segments()
             self.streets = fastest_route.list_streets(self.segments)
@@ -327,6 +333,9 @@ class SmartCityApp:
 
         self.nearest_road_button = self._button(
             controls, "Rua mais próxima", self.find_nearest_road, primary=False, pady=(4, 0))
+        self.nearest_parking_button = self._button(
+            controls, "Estacionamento livre mais próximo", self.find_nearest_parking,
+            primary=False, pady=(4, 0))
 
         self._separator(controls)
 
@@ -584,6 +593,80 @@ class SmartCityApp:
                 ("Velocidade média", average_velocity),
             ],
         )
+
+    # --- estacionamento livre mais próximo ---
+    def find_nearest_parking(self):
+        self.nearest_parking_button.configure(state="disabled")
+        self.status.set("A procurar estacionamento livre e a calcular a rota...")
+        threading.Thread(target=self._nearest_parking_worker, daemon=True).start()
+
+    def _nearest_parking_worker(self):
+        parking_data = self.parking_data
+        try:
+            latitude, longitude, *_ = locationCoordinates()
+            if parking_data is None:
+                parking_data = parking_availability.load_parking_data()
+            result = parking_availability.nearest_available_route(
+                parking_data,
+                latitude,
+                longitude,
+                max_age_h=24,
+                hour=roadXcross.hour_now(),
+                segments=self.segments,
+            )
+            self.root.after(
+                0, self._show_nearest_parking_result, result,
+                (latitude, longitude), parking_data, None,
+            )
+        except BaseException as error:  # locationCoordinates() termina com SystemExit quando não há rede
+            self.root.after(0, self._show_nearest_parking_result, None, None, parking_data, error)
+
+    def _show_nearest_parking_result(self, result, position, parking_data, error):
+        self.nearest_parking_button.configure(state="normal")
+        if parking_data is not None:
+            self.parking_data = parking_data
+        if error is not None:
+            self.status.set("Falha ao procurar estacionamento")
+            messagebox.showerror("Falha ao procurar estacionamento", str(error), parent=self.root)
+            return
+
+        spot = result["spot"]
+        route = result["route"]
+        features = [
+            {"kind": "marker", "position": position, "label": "A sua localização"},
+            {
+                "kind": "marker",
+                "position": (float(spot["lat"]), float(spot["lon"])),
+                "label": f"Estacionamento livre {_short_parking_id(spot['entityId'])}",
+            },
+        ]
+        for step in route["steps"]:
+            features.extend(
+                {"kind": "road", "position": path, "label": step["street"]}
+                for path in _road_paths(step["segment_id"])
+            )
+        self.show_map_features(features)
+
+        steps = [
+            f"{index}. {step['street']}: {step['length_m']:.0f} m, "
+            f"{fastest_route.format_duration(step['time_s'])}"
+            for index, step in enumerate(fastest_route.group_steps(route["steps"]), 1)
+        ]
+        fields = [
+            ("Lugar livre", _short_parking_id(spot["entityId"])),
+            ("Estado dos dados", f"Última leitura geral: {result['moment']:%Y-%m-%d %H:%M} UTC"),
+            ("Última leitura deste lugar", f"há {spot['age_h']:.1f} h (máximo aceite: 24 h)"),
+            ("Distância em linha reta", f"{spot['distance_m']:.0f} m"),
+            ("Rua de origem", result["origin_road"]["name"] or "Sem nome"),
+            ("Rua do estacionamento", result["parking_road"]["name"] or "Sem nome"),
+            ("Tempo estimado de carro", fastest_route.format_duration(route["total_s"])),
+            ("Distância da rota", f"{route['distance_m'] / 1000:.2f} km"),
+            ("Percurso", "\n".join(steps) if steps else "Sem instruções disponíveis"),
+        ]
+        notes = fastest_route.route_notes(route, lang="pt")
+        if notes:
+            fields.append(("Notas", "\n".join(notes)))
+        self.show_results("Estacionamento livre mais próximo", fields)
 
     # --- espera nas passadeiras ---
     def analyze_wait(self):
