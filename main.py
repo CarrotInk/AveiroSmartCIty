@@ -17,7 +17,7 @@ import roadXcross
 from location_time import locationCoordinates
 from road_match import find_nearest_road as lookup_nearest_road
 
-ctk.set_appearance_mode("light")
+ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -230,22 +230,46 @@ def parking_fields(number):
 
 # ================================================================================================================
 class SmartCityApp:
-    BG = "#F4F7FB"
-    CARD = "#FFFFFF"
-    NAVY = "#172B4D"
-    BLUE = "#2463EB"
-    MUTED = "#667085"
-    BORDER = "#DDE5EF"
+    THEMES = {
+        "dark": {
+            "bg": "#10151D",
+            "card": "#1A222D",
+            "text": "#E6EDF7",
+            "blue": "#4D8DFF",
+            "muted": "#9AA8BA",
+            "border": "#303B49",
+            "secondary": "#25364F",
+            "secondary_hover": "#304766",
+            "secondary_text": "#A9C7FF",
+            "result": "#222D3A",
+        },
+        "light": {
+            "bg": "#F4F7FB",
+            "card": "#FFFFFF",
+            "text": "#172B4D",
+            "blue": "#2463EB",
+            "muted": "#667085",
+            "border": "#DDE5EF",
+            "secondary": "#EAF0FF",
+            "secondary_hover": "#DCE6FF",
+            "secondary_text": "#2463EB",
+            "result": "#F7F9FC",
+        },
+    }
 
     def __init__(self, root):
         self.root = root
         self.root.title("Aveiro Smart City")
         self.root.geometry("1320x720")
         self.root.minsize(1000, 600)
-        self.root.configure(fg_color=self.BG)
         self.root.grid_columnconfigure(0, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
+        self.is_dark = True
+        self._apply_theme_palette()
+        self.last_result = None
+        self.current_map_features = None
+        self.current_map_fit_bounds = False
         self.route_busy = False
         self.wait_data = None
         self.parking_data = None
@@ -257,6 +281,65 @@ class SmartCityApp:
             self.segments, self.streets = None, []
 
         self.build_ui()
+
+    def _apply_theme_palette(self):
+        palette = self.THEMES["dark" if self.is_dark else "light"]
+        self.BG = palette["bg"]
+        self.CARD = palette["card"]
+        self.NAVY = palette["text"]
+        self.BLUE = palette["blue"]
+        self.MUTED = palette["muted"]
+        self.BORDER = palette["border"]
+        self.root.configure(fg_color=self.BG)
+
+    def toggle_theme(self):
+        form_values = {
+            "category": self.category.get(),
+            "id": self.id_entry.get(),
+            "wait_time": self.wait_time_entry.get(),
+            "street": self.street_entry.get(),
+            "route_from": self.route_from.get(),
+            "route_to": self.route_to.get(),
+            "route_hour": self.route_hour.get(),
+        }
+        status = self.status.get()
+        button_states = {
+            name: getattr(self, name).cget("state")
+            for name in (
+                "search_button",
+                "nearest_road_button",
+                "nearest_parking_button",
+                "wait_button",
+                "warning_button",
+                "route_button",
+            )
+        }
+        self.is_dark = bool(self.theme_switch.get())
+        ctk.set_appearance_mode("dark" if self.is_dark else "light")
+        self._apply_theme_palette()
+
+        self.page.destroy()
+        self.build_ui()
+        for name, state in button_states.items():
+            getattr(self, name).configure(state=state)
+        self.category.set(form_values["category"])
+        for entry, value in (
+            (self.id_entry, form_values["id"]),
+            (self.wait_time_entry, form_values["wait_time"]),
+            (self.street_entry, form_values["street"]),
+            (self.route_from, form_values["route_from"]),
+            (self.route_to, form_values["route_to"]),
+            (self.route_hour, form_values["route_hour"]),
+        ):
+            entry.insert(0, value)
+        if self.last_result is not None:
+            self.show_results(*self.last_result)
+        if self.current_map_features is not None:
+            self.show_map_features(
+                self.current_map_features,
+                fit_bounds=self.current_map_fit_bounds,
+            )
+        self.status.set(status)
 
     # --- pequenos auxiliares de interface ---
     def _font(self, size, weight="normal"):
@@ -273,7 +356,11 @@ class SmartCityApp:
         return entry
 
     def _button(self, parent, text, command, primary=True, pady=(0, 10)):
-        kwargs = {} if primary else {"fg_color": "#EAF0FF", "hover_color": "#DCE6FF", "text_color": self.BLUE}
+        kwargs = {} if primary else {
+            "fg_color": self.THEMES["dark" if self.is_dark else "light"]["secondary"],
+            "hover_color": self.THEMES["dark" if self.is_dark else "light"]["secondary_hover"],
+            "text_color": self.THEMES["dark" if self.is_dark else "light"]["secondary_text"],
+        }
         button = ctk.CTkButton(parent, text=text, command=command, height=40, corner_radius=12,
                                font=self._font(12, "bold"), **kwargs)
         button.pack(fill="x", padx=20, pady=pady)
@@ -284,20 +371,36 @@ class SmartCityApp:
 
     def build_ui(self):
         page = ctk.CTkFrame(self.root, fg_color="transparent", corner_radius=0)
+        self.page = page
         page.grid(row=0, column=0, sticky="nsew", padx=28, pady=24)
-        page.grid_columnconfigure(0, weight=1)
+        page.grid_columnconfigure((0, 1), weight=1)
         page.grid_rowconfigure(1, weight=1)
 
-        header = ctk.CTkFrame(page, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
+        title_header = ctk.CTkFrame(page, fg_color="transparent")
+        title_header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
 
-        ctk.CTkLabel(header, text="Aveiro Smart City", text_color=self.NAVY,
+        ctk.CTkLabel(title_header, text="Aveiro Smart City", text_color=self.NAVY,
                      font=self._font(27, "bold")).pack(anchor="w")
-        ctk.CTkLabel(header, text="Visualização de dados sobre mobilidade", text_color=self.MUTED,
+        ctk.CTkLabel(title_header, text="Visualização de dados sobre mobilidade", text_color=self.MUTED,
                      font=self._font(12)).pack(anchor="w", pady=(4, 0))
 
+        header = ctk.CTkFrame(page, fg_color="transparent")
+        header.grid(row=0, column=1, sticky="ne", pady=(0, 20))
+        self.theme_switch = ctk.CTkSwitch(
+            header,
+            text="Dark mode",
+            command=self.toggle_theme,
+            onvalue=1,
+            offvalue=0,
+            font=self._font(11),
+            text_color=self.MUTED,
+        )
+        self.theme_switch.pack(anchor="w", pady=(0, 10))
+        if self.is_dark:
+            self.theme_switch.select()
+
         content = ctk.CTkFrame(page, fg_color="transparent")
-        content.grid(row=1, column=0, sticky="nsew")
+        content.grid(row=1, column=0, columnspan=2, sticky="nsew")
         content.grid_columnconfigure(0, weight=0, minsize=270)
         content.grid_columnconfigure(1, weight=1)
         content.grid_columnconfigure(2, weight=1)
@@ -396,9 +499,16 @@ class SmartCityApp:
                      font=self._font(16, "bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 10))
 
         self.map_widget = TkinterMapView(map_card, corner_radius=12)
+        self.map_widget.set_tile_server("https://tile.openstreetmap.org/{z}/{x}/{y}.png")
         self.map_widget.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
         self.map_widget.set_position(40.64, -8.65)
         self.map_widget.set_zoom(14)
+        ctk.CTkLabel(
+            map_card,
+            text="© OpenStreetMap contributors",
+            text_color=self.MUTED,
+            font=self._font(9),
+        ).grid(row=2, column=0, sticky="e", padx=14, pady=(0, 8))
 
         self.show_empty_state()
         self.id_entry.focus_set()
@@ -418,13 +528,18 @@ class SmartCityApp:
                      justify="left").pack(anchor="w", padx=10)
 
     def show_results(self, title, fields):
+        self.last_result = (title, fields)
         self.clear_results()
 
         ctk.CTkLabel(self.result_body, text=title, text_color=self.NAVY,
                      font=self._font(16, "bold")).pack(anchor="w", padx=10, pady=(8, 16))
 
         for name, value in fields:
-            row = ctk.CTkFrame(self.result_body, fg_color="#F7F9FC", corner_radius=12)
+            row = ctk.CTkFrame(
+                self.result_body,
+                fg_color=self.THEMES["dark" if self.is_dark else "light"]["result"],
+                corner_radius=12,
+            )
             row.pack(fill="x", padx=6, pady=5)
 
             ctk.CTkLabel(row, text=name.upper(), text_color=self.MUTED,
@@ -544,6 +659,12 @@ class SmartCityApp:
         if notes:
             fields.append(("Notas", "\n".join(notes)))
 
+        features = [
+            {"kind": "road", "position": path, "label": step["street"]}
+            for step in route["steps"]
+            for path in _road_paths(step["segment_id"])
+        ]
+        self.show_map_features(features, fit_bounds=True)
         self.show_results("Rota mais rápida de carro", fields)
 
     # --- rua mais próxima ---
@@ -785,7 +906,9 @@ class SmartCityApp:
         )
 
     # --- mapa ---
-    def show_map_features(self, features):
+    def show_map_features(self, features, fit_bounds=False):
+        self.current_map_features = features
+        self.current_map_fit_bounds = fit_bounds
         self.map_widget.delete_all_marker()
         self.map_widget.delete_all_path()
 
@@ -802,7 +925,13 @@ class SmartCityApp:
                     self.map_widget.set_path(path, width=3)
                     points.extend(path)
 
-        if points:
+        if points and fit_bounds:
+            latitudes, longitudes = zip(*points)
+            self.map_widget.fit_bounding_box(
+                (max(latitudes), min(longitudes)),
+                (min(latitudes), max(longitudes)),
+            )
+        elif points:
             center_lat = sum(point[0] for point in points) / len(points)
             center_lon = sum(point[1] for point in points) / len(points)
             self.map_widget.set_position(center_lat, center_lon)
