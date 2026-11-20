@@ -1,32 +1,3 @@
-"""
-parking_availability - lugares de estacionamento livres a uma hora definida pelo utilizador (ATCLL, Aveiro).
-
-Lê o data/smartparking.csv (um registo por mudança/leitura de estado de cada lugar) e responde a:
-    "Que lugares estavam livres às 14:30?"
-
-Duas formas de responder:
-  - estado nesse instante (por defeito): para cada lugar usa a ÚLTIMA leitura até essa hora.
-    Sem data usa o último dia que existe nos dados.
-  - típico (--typical): repete o cálculo em todos os dias dos dados e diz, para cada lugar, em que
-    percentagem dos dias estava livre a essa hora.
-
-Uso como módulo (no main):
-    import parking_availability as pa
-    df = pa.load_parking_data()
-    r = pa.availability_at(df, "14:30")                    # ou date="2026-11-10"
-    print(pa.format_availability(r))
-    r["free_spots"]            # DataFrame: entityId, lat, lon, age_h
-    t = pa.typical_availability(df, "14:30")
-
-Uso na linha de comandos (sem argumentos abre o menu):
-    python parking_availability.py 14:30
-    python parking_availability.py 14:30 --date 2026-11-10 --max-age 6
-    python parking_availability.py 14:30 --typical
-    python parking_availabiality.py --nearest
-    python parking_availabiality.py --nearest --lat 40.64 --lon -8.65
-
-As horas são UTC (== hora de Aveiro em novembro), como no resto do projeto. Só precisa de pandas.
-"""
 import argparse
 import json
 import math
