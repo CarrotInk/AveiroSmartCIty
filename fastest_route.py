@@ -68,7 +68,7 @@ def _point(geojson):
 
 def load_segments(path=ROAD_REF_CSV):
     """Uma linha por segmento: ids, nós inicial/final, comprimento (m), nomes e velocidades de referência."""
-    rs = pd.read_csv(path)
+    rs = rx.read_ref_csv(path)
     rows = []
     for r in rs.itertuples(index=False):
         try:

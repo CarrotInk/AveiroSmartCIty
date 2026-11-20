@@ -2,47 +2,228 @@ import json
 import statistics as st
 import threading
 import tkinter as tk
-from datetime import datetime, timezone
-from tkinter import messagebox, ttk
+from functools import lru_cache
+from pathlib import Path
+from tkinter import messagebox
 
+import customtkinter as ctk
 import pandas as pd
+from tkintermapview import TkinterMapView
 
+import crosswalk_wait
 import fastest_route
-from road_match import nearest_road
+import roadXcross
+from location_time import locationCoordinates
+from road_match import find_nearest_road as lookup_nearest_road
 
-#===Load data=================================================================================================
-smart_crosswalk = pd.read_csv("data/smartcrosswalk.csv", nrows=1000)
-road_segments = pd.read_csv("data/roadsegments_stats.csv", nrows=1000)
-smart_parking = pd.read_csv("data/smartparking.csv", nrows=1000)
-#=============================================================================================================
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("blue")
 
-def convertDate(json_to_convert):
-    data = json.loads(json_to_convert)
-    milliseconds = int(data["$date"]["$numberLong"])
-    return datetime.fromtimestamp(milliseconds / 1000.0, tz=timezone.utc)
+DATA_DIR = Path(__file__).resolve().parent / "data"
+REFERENCE_DIR = DATA_DIR / "reference-entities"
+
+
+# ===Dados========================================================================================================
+@lru_cache(maxsize=1)
+def _load_map_sources():
+    """Tabelas pequenas de referência (passadeiras e ruas), lidas uma só vez."""
+    crosswalks = roadXcross.read_ref_csv(REFERENCE_DIR / "SmartCrosswalk.csv").set_index("entityId")
+    roads = roadXcross.read_ref_csv(REFERENCE_DIR / "RoadSegment.csv").set_index("entityId")
+    return crosswalks[~crosswalks.index.duplicated()], roads[~roads.index.duplicated()]
+
+
+@lru_cache(maxsize=None)
+def _events_table(filename):
+    """Ficheiros de eventos (grandes): só se leem quando são precisos e só as colunas necessárias.
+    (Antes o roadsegments_stats.csv era lido com nrows=1000, o que dava resultados errados.)"""
+    return roadXcross.read_csv_safe(DATA_DIR / filename, usecols=["entityId", "documentJson"])
+
+
+@lru_cache(maxsize=1)
+def _speed_table():
+    """Velocidades médias por segmento e hora (cache do fastest_route, não relê o ficheiro grande)."""
+    segments = fastest_route.load_segments()
+    speeds, _ = fastest_route.load_speeds_and_waits(segments.index)
+    return speeds
 
 
 def get_value(data_dict, field):
+    """Valor de um campo de um documento já "achatado" (ver get_documents); listas dão o 1.º elemento."""
     value = data_dict.get(field)
     if isinstance(value, list) and value:
         value = value[0]
-    if isinstance(value, dict):
-        return float(value.get("$numberDouble", 0.0))
     return value
 
 
 def get_rows(frame, entity_id):
-    rows = frame.query("entityId == @entity_id").reset_index(drop=True)
+    rows = frame[frame["entityId"] == entity_id].reset_index(drop=True)
     if rows.empty:
-        raise ValueError(f"No records found for {entity_id}")
+        raise ValueError(f"Não existem registos para {entity_id}")
     return rows
 
 
 def get_documents(rows):
-    return rows["documentJson"].apply(json.loads).tolist()
+    """Converte o documentJson e desembrulha o Extended JSON ({"$numberDouble": ...}) para números normais."""
+    return [roadXcross._flat(json.loads(s)) for s in rows["documentJson"]]
 
 
-#=============================================================================================================
+def latest_document(documents):
+    """Documento mais recente (pelo eventTimestamp; se não houver, o último do ficheiro)."""
+    floor = pd.Timestamp("1970-01-01", tz="UTC")
+
+    def key(doc):
+        ts = doc.get("eventTimestamp")
+        return ts if isinstance(ts, pd.Timestamp) else floor
+
+    return max(reversed(documents), key=key)
+
+
+def _numbers(documents, field):
+    values = []
+    for doc in documents:
+        value = doc.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            values.append(float(value))
+    return values
+
+
+def _polygon_center(location_json):
+    coordinates = json.loads(location_json)["coordinates"][0]
+    if len(coordinates) > 1 and coordinates[0] == coordinates[-1]:
+        coordinates = coordinates[:-1]
+
+    longitude = sum(point[0] for point in coordinates) / len(coordinates)
+    latitude = sum(point[1] for point in coordinates) / len(coordinates)
+    return latitude, longitude
+
+
+def _road_paths(road_id):
+    """Linhas (lista de (lat, lon)) de um segmento de estrada."""
+    _, roads = _load_map_sources()
+    if road_id not in roads.index:
+        return []
+    geometry = json.loads(roads.at[road_id, "location"])
+    coordinates = geometry.get("coordinates") or []
+    lines = coordinates if geometry.get("type") == "MultiLineString" else [coordinates]
+    # GeoJSON guarda [longitude, latitude]; o mapa quer (latitude, longitude).
+    return [[(point[1], point[0]) for point in line] for line in lines if len(line) >= 2]
+
+
+def _map_features(crosswalk_ids):
+    crosswalks, _ = _load_map_sources()
+    links = pd.read_csv(roadXcross.LINKS_CSV)
+
+    crosswalk_ids = set(crosswalk_ids)
+    features = []
+
+    for crosswalk_id in sorted(crosswalk_ids):
+        if crosswalk_id not in crosswalks.index:
+            continue
+
+        lat, lon = _polygon_center(crosswalks.at[crosswalk_id, "location"])
+        features.append({
+            "kind": "crosswalk",
+            "position": (lat, lon),
+            "label": f"Passadeira {crosswalk_id.rsplit(':', 1)[-1]}",
+        })
+
+    linked_roads = links[
+        links["smartcrosswalk"].isin(crosswalk_ids)
+        & links["use_for_alert"].astype(str).str.lower().eq("true")
+    ]
+
+    for road_id in linked_roads["segment_id"].dropna().unique():
+        for path in _road_paths(road_id):
+            features.append({
+                "kind": "road",
+                "position": path,
+                "label": f"Rua {road_id.rsplit(':', 1)[-1]}",
+            })
+
+    return features
+
+
+def road_speed_text(segment_id, hour):
+    """Velocidade média da rua à hora (UTC) indicada; se não houver dados, usa o último valor registado."""
+    try:
+        speeds = _speed_table()
+        rows = speeds[(speeds["segment_id"] == segment_id) & (speeds["hour"] == hour)]
+        if len(rows) and rows["n"].sum() > 0:
+            average = float((rows["speed_mps"] * rows["n"]).sum() / rows["n"].sum())
+            return f"{average * 3.6:.2f} km/h (média às {hour}h UTC)"
+    except Exception as error:
+        print(f"Sem tabela de velocidades: {error}")
+
+    _, roads = _load_map_sources()
+    if segment_id in roads.index:
+        snapshot = roads.at[segment_id, "averageVelocity"]
+        if pd.notna(snapshot) and 0 < snapshot <= roadXcross.MAX_SPEED_MPS:
+            return f"{snapshot * 3.6:.2f} km/h (último valor registado)"
+    return "Sem registos para esta hora"
+
+
+# ===Consultas por ID (correm numa thread, por isso podem demorar)=================================================
+def crosswalk_fields(number):
+    entity_id = f"urn:ngsi-ld:SmartCrosswalk:{number:04}"
+    documents = get_documents(get_rows(_events_table("smartcrosswalk.csv"), entity_id))
+
+    wait_times = _numbers(documents, "wait_time")
+    traverse_times = _numbers(documents, "traverse_time")
+    latest = latest_document(documents)
+
+    average_wait = f"{st.mean(wait_times):.2f} s" if wait_times else "Sem dados"
+    average_traverse = f"{st.mean(traverse_times):.2f} s" if traverse_times else "Sem dados"
+
+    return "Passadeira inteligente", [
+        ("ID da passadeira", f"{number:04}"),
+        ("Observado por", get_value(latest, "observedBy") or "Indisponível"),
+        ("Tempo médio de espera", average_wait),
+        ("Tempo médio do percurso", average_traverse),
+        ("Registos analisados", len(documents)),
+    ]
+
+
+def road_segment_fields(number):
+    # Os dados de uma rua (nome, limite) estão no RoadSegment.csv de referência, que é pequeno;
+    # assim não é preciso ler o roadsegments_stats.csv (1,68 milhões de linhas).
+    entity_id = f"urn:ngsi-ld:RoadSegment:{number:05}"
+    _, roads = _load_map_sources()
+    if entity_id not in roads.index:
+        raise ValueError(f"Não existem registos para {entity_id}")
+    row = roads.loc[entity_id]
+
+    name = roadXcross._segment_names(row["name"])
+    try:
+        limits = [roadXcross._num(v) for v in json.loads(row["maxAllowedVelocity"])]
+        limits = [v for v in limits if v]
+        speed_text = f"{st.mean(limits) * 3.6:.2f} km/h"
+    except (TypeError, ValueError, st.StatisticsError):
+        speed_text = "Indisponível"
+
+    return "Segmento de estrada", [
+        ("ID da rua", f"{number:05}"),
+        ("Rua", name[0] if name else "Indisponível"),
+        ("Velocidade máxima permitida", speed_text),
+    ]
+
+
+def parking_fields(number):
+    entity_id = f"urn:ngsi-ld:ParkingSpot:{number:04}"
+    latest = latest_document(get_documents(get_rows(_events_table("smartparking.csv"), entity_id)))
+
+    location = get_value(latest, "location")
+    if isinstance(location, dict) and isinstance(location.get("coordinates"), list):
+        lon, lat = location["coordinates"][:2]
+        location = f"{lat:.6f}, {lon:.6f}"
+
+    return "Lugar de estacionamento", [
+        ("ID do lugar", f"{number:04}"),
+        ("Estado", get_value(latest, "status") or "Indisponível"),
+        ("Localização", location or "Indisponível"),
+    ]
+
+
+# ================================================================================================================
 class SmartCityApp:
     BG = "#F4F7FB"
     CARD = "#FFFFFF"
@@ -54,215 +235,166 @@ class SmartCityApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Aveiro Smart City")
-        self.root.geometry("920x800")
-        self.root.minsize(760, 720)
-        self.root.configure(bg=self.BG)
+        self.root.geometry("1320x720")
+        self.root.minsize(1000, 600)
+        self.root.configure(fg_color=self.BG)
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
 
         self.route_busy = False
-        try:                                       # carrega o mapa uma vez (ms); dá a lista de ruas às caixas
+        self.wait_data = None
+        try:                                       # carrega o mapa uma vez (ms); dá a lista de ruas
             self.segments = fastest_route.load_segments()
             self.streets = fastest_route.list_streets(self.segments)
         except Exception as error:
             print(f"Could not load the road map: {error}")
             self.segments, self.streets = None, []
 
-        self.configure_styles()
         self.build_ui()
 
-    def configure_styles(self):
-        style = ttk.Style(self.root)
-        style.theme_use("clam")
+    # --- pequenos auxiliares de interface ---
+    def _font(self, size, weight="normal"):
+        return ctk.CTkFont(family="Segoe UI", size=size, weight=weight)
 
-        style.configure("App.TFrame", background=self.BG)
-        style.configure("Card.TFrame", background=self.CARD)
-        style.configure(
-            "Title.TLabel",
-            background=self.BG,
-            foreground=self.NAVY,
-            font=("Segoe UI", 23, "bold"),
-        )
-        style.configure(
-            "Subtitle.TLabel",
-            background=self.BG,
-            foreground=self.MUTED,
-            font=("Segoe UI", 10),
-        )
-        style.configure(
-            "Section.TLabel",
-            background=self.CARD,
-            foreground=self.NAVY,
-            font=("Segoe UI", 13, "bold"),
-        )
-        style.configure(
-            "Field.TLabel",
-            background=self.CARD,
-            foreground=self.MUTED,
-            font=("Segoe UI", 9, "bold"),
-        )
-        style.configure(
-            "Value.TLabel",
-            background=self.CARD,
-            foreground=self.NAVY,
-            font=("Segoe UI", 11),
-        )
-        style.configure(
-            "Action.TButton",
-            font=("Segoe UI", 10, "bold"),
-            padding=(12, 10),
-        )
+    def _caption(self, parent, text):
+        ctk.CTkLabel(parent, text=text, text_color=self.MUTED,
+                     font=self._font(10, "bold")).pack(anchor="w", padx=20, pady=(0, 7))
+
+    def _entry(self, parent, placeholder, height=38, pady=(0, 12)):
+        entry = ctk.CTkEntry(parent, height=height, corner_radius=11, border_color=self.BORDER,
+                             placeholder_text=placeholder, font=self._font(12))
+        entry.pack(fill="x", padx=20, pady=pady)
+        return entry
+
+    def _button(self, parent, text, command, primary=True, pady=(0, 10)):
+        kwargs = {} if primary else {"fg_color": "#EAF0FF", "hover_color": "#DCE6FF", "text_color": self.BLUE}
+        button = ctk.CTkButton(parent, text=text, command=command, height=40, corner_radius=12,
+                               font=self._font(12, "bold"), **kwargs)
+        button.pack(fill="x", padx=20, pady=pady)
+        return button
+
+    def _separator(self, parent):
+        ctk.CTkFrame(parent, height=1, fg_color=self.BORDER).pack(fill="x", padx=20, pady=10)
 
     def build_ui(self):
-        page = ttk.Frame(self.root, style="App.TFrame", padding=(30, 24))
-        page.pack(fill="both", expand=True)
-        page.columnconfigure(0, weight=1)
-        page.rowconfigure(1, weight=1)
+        page = ctk.CTkFrame(self.root, fg_color="transparent", corner_radius=0)
+        page.grid(row=0, column=0, sticky="nsew", padx=28, pady=24)
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(1, weight=1)
 
-        header = ttk.Frame(page, style="App.TFrame")
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 22))
+        header = ctk.CTkFrame(page, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
 
-        ttk.Label(
-            header,
-            text="Aveiro Smart City",
-            style="Title.TLabel",
-        ).pack(anchor="w")
+        ctk.CTkLabel(header, text="Aveiro Smart City", text_color=self.NAVY,
+                     font=self._font(27, "bold")).pack(anchor="w")
+        ctk.CTkLabel(header, text="Visualização de dados sobre mobilidade", text_color=self.MUTED,
+                     font=self._font(12)).pack(anchor="w", pady=(4, 0))
 
-        ttk.Label(
-            header,
-            text="Mobility and infrastructure data viewer",
-            style="Subtitle.TLabel",
-        ).pack(anchor="w", pady=(4, 0))
-
-        content = ttk.Frame(page, style="App.TFrame")
+        content = ctk.CTkFrame(page, fg_color="transparent")
         content.grid(row=1, column=0, sticky="nsew")
-        content.columnconfigure(0, weight=0, minsize=250)
-        content.columnconfigure(1, weight=1)
-        content.rowconfigure(0, weight=1)
+        content.grid_columnconfigure(0, weight=0, minsize=270)
+        content.grid_columnconfigure(1, weight=1)
+        content.grid_columnconfigure(2, weight=1)
+        content.grid_rowconfigure(0, weight=1)
 
-        controls = ttk.Frame(content, style="Card.TFrame", padding=20)
+        # Os controlos são muitos: ficam numa coluna com scroll.
+        controls = ctk.CTkScrollableFrame(content, fg_color=self.CARD, corner_radius=20,
+                                          border_width=1, border_color=self.BORDER, width=250)
         controls.grid(row=0, column=0, sticky="nsew", padx=(0, 18))
 
-        ttk.Label(
-            controls,
-            text="Look up a record",
-            style="Section.TLabel",
-        ).pack(anchor="w")
+        # --- pesquisa por ID ---
+        ctk.CTkLabel(controls, text="Pesquisa um registo", text_color=self.NAVY,
+                     font=self._font(16, "bold")).pack(anchor="w", padx=20, pady=(14, 0))
+        ctk.CTkLabel(controls, text="Escolha uma categoria e insira o ID do elemento",
+                     text_color=self.MUTED, font=self._font(11), wraplength=210,
+                     justify="left").pack(anchor="w", padx=20, pady=(6, 16))
 
-        ttk.Label(
-            controls,
-            text="Choose a category and enter its numeric ID.",
-            style="Subtitle.TLabel",
-            wraplength=210,
-        ).pack(anchor="w", pady=(6, 18))
+        self._caption(controls, "CATEGORIA")
+        self.category = ctk.CTkComboBox(
+            controls, values=("Smart crosswalk", "Road segment", "Parking spot"), state="readonly",
+            height=40, corner_radius=11, border_color=self.BORDER, button_color=self.BLUE,
+            font=self._font(12))
+        self.category.set("Smart crosswalk")
+        self.category.pack(fill="x", padx=20, pady=(0, 14))
 
-        ttk.Label(
-            controls,
-            text="CATEGORY",
-            style="Field.TLabel",
-        ).pack(anchor="w", pady=(0, 6))
-
-        self.category = tk.StringVar(value="Smart crosswalk")
-        category_box = ttk.Combobox(
-            controls,
-            textvariable=self.category,
-            state="readonly",
-            values=("Smart crosswalk", "Road segment", "Parking spot"),
-            font=("Segoe UI", 10),
-        )
-        category_box.pack(fill="x", pady=(0, 14), ipady=4)
-
-        ttk.Label(
-            controls,
-            text="RECORD ID",
-            style="Field.TLabel",
-        ).pack(anchor="w", pady=(0, 6))
-
-        self.record_id = tk.StringVar()
-        self.id_entry = ttk.Entry(
-            controls,
-            textvariable=self.record_id,
-            font=("Segoe UI", 12),
-        )
-        self.id_entry.pack(fill="x", pady=(0, 14), ipady=5)
+        self._caption(controls, "ID DO REGISTO")
+        self.id_entry = self._entry(controls, "Insira o ID numérico", height=42, pady=(0, 14))
         self.id_entry.bind("<Return>", lambda _event: self.search())
 
-        ttk.Button(
-            controls,
-            text="Search",
-            style="Action.TButton",
-            command=self.search,
-        ).pack(fill="x", pady=(0, 8))
+        self.search_button = self._button(controls, "Procurar", self.search)
 
-        ttk.Separator(controls).pack(fill="x", pady=10)
+        self._separator(controls)
 
-        ttk.Button(
-            controls,
-            text="Find nearest road",
-            style="Action.TButton",
-            command=self.find_nearest_road,
-        ).pack(fill="x")
+        self.nearest_road_button = self._button(
+            controls, "Rua mais próxima", self.find_nearest_road, primary=False, pady=(4, 0))
 
-        ttk.Separator(controls).pack(fill="x", pady=10)
+        self._separator(controls)
 
-        ttk.Label(
-            controls,
-            text="Fastest route (by car)",
-            style="Section.TLabel",
-        ).pack(anchor="w", pady=(0, 8))
+        # --- espera na passadeira ---
+        self.wait_time_entry = self._entry(controls, "Hora UTC (HH:MM)", pady=(4, 6))
+        self.wait_button = self._button(controls, "Analisar espera da passadeira", self.analyze_wait)
 
-        self.route_from = tk.StringVar()
-        self.route_to = tk.StringVar()
-        self.route_hour = tk.StringVar()
+        self._separator(controls)
 
-        for label, variable in (("FROM STREET", self.route_from), ("TO STREET", self.route_to)):
-            ttk.Label(controls, text=label, style="Field.TLabel").pack(anchor="w", pady=(0, 4))
-            ttk.Combobox(
-                controls,
-                textvariable=variable,
-                values=self.streets,
-                font=("Segoe UI", 10),
-            ).pack(fill="x", pady=(0, 10), ipady=3)
+        # --- avisos da rua ---
+        self.street_entry = self._entry(controls, "Nome da rua", pady=(4, 6))
+        self.street_entry.bind("<Return>", lambda _event: self.show_street_warnings())
+        self.warning_button = self._button(controls, "Avisos da rua", self.show_street_warnings)
 
-        ttk.Label(
-            controls,
-            text="HOUR (UTC, EMPTY = NOW)",
-            style="Field.TLabel",
-        ).pack(anchor="w", pady=(0, 4))
-        hour_entry = ttk.Entry(controls, textvariable=self.route_hour, font=("Segoe UI", 11), width=6)
-        hour_entry.pack(anchor="w", pady=(0, 10), ipady=3)
-        hour_entry.bind("<Return>", lambda _event: self.find_route())
+        self._separator(controls)
 
-        self.route_button = ttk.Button(
-            controls,
-            text="Find fastest route by car",
-            style="Action.TButton",
-            command=self.find_route,
-        )
-        self.route_button.pack(fill="x")
+        # --- rota mais rápida ---
+        ctk.CTkLabel(controls, text="Rota mais rápida (de carro)", text_color=self.NAVY,
+                     font=self._font(14, "bold")).pack(anchor="w", padx=20, pady=(0, 8))
 
-        self.status = tk.StringVar(value="Ready")
-        ttk.Label(
-            controls,
-            textvariable=self.status,
-            style="Subtitle.TLabel",
-            wraplength=210,
-        ).pack(anchor="w", side="bottom", pady=(18, 0))
+        # Campos de texto (a pesquisa aceita nomes parciais, sem acentos, e sugere alternativas):
+        # uma lista com centenas de ruas não cabe num menu do customtkinter.
+        self._caption(controls, "RUA DE ORIGEM")
+        self.route_from = self._entry(controls, "Ex.: Rua de Ovar")
+        self._caption(controls, "RUA DE DESTINO")
+        self.route_to = self._entry(controls, "Ex.: Avenida Europa")
+        self._caption(controls, "HORA (UTC, VAZIO = AGORA)")
+        self.route_hour = self._entry(controls, "0-23")
+        self.route_hour.bind("<Return>", lambda _event: self.find_route())
 
-        result_card = ttk.Frame(content, style="Card.TFrame", padding=24)
-        result_card.grid(row=0, column=1, sticky="nsew")
-        result_card.columnconfigure(0, weight=1)
+        self.route_button = self._button(controls, "Calcular rota mais rápida", self.find_route)
 
-        ttk.Label(
-            result_card,
-            text="Results",
-            style="Section.TLabel",
-        ).grid(row=0, column=0, sticky="w", pady=(0, 16))
+        self.status = tk.StringVar(value="Pronto")
+        ctk.CTkLabel(controls, textvariable=self.status, text_color=self.MUTED, font=self._font(10),
+                     wraplength=210, justify="left").pack(anchor="w", padx=20, pady=(8, 14))
 
-        self.result_body = ttk.Frame(result_card, style="Card.TFrame")
-        self.result_body.grid(row=1, column=0, sticky="new")
+        # --- resultados ---
+        result_card = ctk.CTkFrame(content, fg_color=self.CARD, corner_radius=20,
+                                   border_width=1, border_color=self.BORDER)
+        result_card.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
+        result_card.grid_columnconfigure(0, weight=1)
+        result_card.grid_rowconfigure(1, weight=1)
+
+        ctk.CTkLabel(result_card, text="Resultado", text_color=self.NAVY,
+                     font=self._font(16, "bold")).grid(row=0, column=0, sticky="w", padx=24, pady=(22, 12))
+
+        self.result_body = ctk.CTkScrollableFrame(result_card, fg_color="transparent", corner_radius=12)
+        self.result_body.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
+
+        # --- mapa ---
+        map_card = ctk.CTkFrame(content, fg_color=self.CARD, corner_radius=20,
+                                border_width=1, border_color=self.BORDER)
+        map_card.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+        map_card.grid_rowconfigure(1, weight=1)
+        map_card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(map_card, text="Mapa Interativo", text_color=self.NAVY,
+                     font=self._font(16, "bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 10))
+
+        self.map_widget = TkinterMapView(map_card, corner_radius=12)
+        self.map_widget.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        self.map_widget.set_position(40.64, -8.65)
+        self.map_widget.set_zoom(14)
+
         self.show_empty_state()
-
         self.id_entry.focus_set()
 
+    # --- resultados ---
     def clear_results(self):
         for widget in self.result_body.winfo_children():
             widget.destroy()
@@ -270,150 +402,64 @@ class SmartCityApp:
     def show_empty_state(self):
         self.clear_results()
 
-        ttk.Label(
-            self.result_body,
-            text="Your results will appear here",
-            style="Value.TLabel",
-        ).pack(anchor="w", pady=(12, 4))
-
-        ttk.Label(
-            self.result_body,
-            text="Choose a data type and enter its ID to view the latest information.",
-            style="Subtitle.TLabel",
-            wraplength=480,
-            justify="left",
-        ).pack(anchor="w")
+        ctk.CTkLabel(self.result_body, text="O resultado aparecerá aqui", text_color=self.NAVY,
+                     font=self._font(15, "bold")).pack(anchor="w", padx=10, pady=(18, 5))
+        ctk.CTkLabel(self.result_body, text="Escolha um tipo de dados e insira o seu ID",
+                     text_color=self.MUTED, font=self._font(12), wraplength=480,
+                     justify="left").pack(anchor="w", padx=10)
 
     def show_results(self, title, fields):
         self.clear_results()
 
-        ttk.Label(
-            self.result_body,
-            text=title,
-            style="Section.TLabel",
-        ).pack(anchor="w", pady=(0, 14))
+        ctk.CTkLabel(self.result_body, text=title, text_color=self.NAVY,
+                     font=self._font(16, "bold")).pack(anchor="w", padx=10, pady=(8, 16))
 
         for name, value in fields:
-            row = ttk.Frame(self.result_body, style="Card.TFrame")
-            row.pack(fill="x", pady=7)
+            row = ctk.CTkFrame(self.result_body, fg_color="#F7F9FC", corner_radius=12)
+            row.pack(fill="x", padx=6, pady=5)
 
-            ttk.Label(
-                row,
-                text=name.upper(),
-                style="Field.TLabel",
-            ).pack(anchor="w")
+            ctk.CTkLabel(row, text=name.upper(), text_color=self.MUTED,
+                         font=self._font(9, "bold")).pack(anchor="w", padx=14, pady=(11, 0))
+            ctk.CTkLabel(row, text=str(value), text_color=self.NAVY, font=self._font(12),
+                         wraplength=500, justify="left").pack(anchor="w", padx=14, pady=(3, 11))
 
-            ttk.Label(
-                row,
-                text=str(value),
-                style="Value.TLabel",
-                wraplength=500,
-                justify="left",
-            ).pack(anchor="w", pady=(3, 0))
+        self.status.set("Informação carregada com sucesso")
 
-        self.status.set("Information loaded successfully")
-
+    # --- pesquisa por ID ---
     def search(self):
-        raw_id = self.record_id.get().strip()
+        raw_id = self.id_entry.get().strip()
 
         if not raw_id.isdigit():
-            messagebox.showwarning(
-                "Invalid ID",
-                "Enter a numeric record ID.",
-                parent=self.root,
-            )
+            messagebox.showwarning("ID inválido", "Insira um ID numérico.", parent=self.root)
             self.id_entry.focus_set()
             return
 
-        number = int(raw_id)
+        self.search_button.configure(state="disabled")
+        self.status.set("A carregar dados... (a primeira pesquisa pode demorar)")
+        threading.Thread(target=self._search_worker, args=(self.category.get(), int(raw_id)),
+                         daemon=True).start()
 
+    def _search_worker(self, category, number):
         try:
-            if self.category.get() == "Smart crosswalk":
-                self.show_crosswalk(number)
-            elif self.category.get() == "Road segment":
-                self.show_road_segment(number)
+            if category == "Smart crosswalk":
+                title, fields = crosswalk_fields(number)
+            elif category == "Road segment":
+                title, fields = road_segment_fields(number)
             else:
-                self.show_parking(number)
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
-            self.status.set("No matching record")
-            messagebox.showerror(
-                "Unable to load record",
-                str(error),
-                parent=self.root,
-            )
+                title, fields = parking_fields(number)
+            self.root.after(0, self._show_search_result, title, fields, None)
+        except Exception as error:
+            self.root.after(0, self._show_search_result, None, None, error)
 
-    def show_crosswalk(self, number):
-        entity_id = f"urn:ngsi-ld:SmartCrosswalk:{number:04}"
-        rows = get_rows(smart_crosswalk, entity_id)
-        documents = get_documents(rows)
+    def _show_search_result(self, title, fields, error):
+        self.search_button.configure(state="normal")
+        if error is not None:
+            self.status.set("Sem registos correspondentes")
+            messagebox.showerror("Falha a carregar registo", str(error), parent=self.root)
+            return
+        self.show_results(title, fields)
 
-        wait_times = []
-        traverse_times = []
-
-        for document in documents:
-            wait = document.get("wait_time")
-            if isinstance(wait, dict):
-                if "$numberDouble" in wait:
-                    wait_times.append(float(wait["$numberDouble"]))
-                elif "$intDouble" in wait:
-                    wait_times.append(float(wait["$intDouble"]))
-
-            traverse = document.get("traverse_time")
-            if isinstance(traverse, dict):
-                if "$numberDouble" in traverse:
-                    traverse_times.append(float(traverse["$numberDouble"]))
-                elif "$intDouble" in traverse:
-                    traverse_times.append(float(traverse["$intDouble"]))
-
-        latest = documents[-1]
-        average_wait = round(st.mean(wait_times), 2) if wait_times else "No data"
-        average_traverse = round(st.mean(traverse_times), 2) if traverse_times else "No data"
-
-        self.show_results(
-            "Smart crosswalk",
-            [
-                ("Crosswalk ID", f"{number:04}"),
-                ("Observed by", get_value(latest, "observedBy") or "Not available"),
-                ("Average wait time", f"{average_wait} seconds"),
-                ("Average traverse time", f"{average_traverse} seconds"),
-                ("Records analyzed", len(documents)),
-            ],
-        )
-
-    def show_road_segment(self, number):
-        entity_id = f"urn:ngsi-ld:RoadSegment:{number:05}"
-        rows = get_rows(road_segments, entity_id)
-        latest = get_documents(rows)[-1]
-
-        speed = get_value(latest, "maxAllowedVelocity")
-        try:
-            speed_text = f"{round(float(speed) * 3.6, 2)} km/h"
-        except (TypeError, ValueError):
-            speed_text = "Not available"
-
-        self.show_results(
-            "Road segment",
-            [
-                ("Road ID", f"{number:05}"),
-                ("Street", get_value(latest, "name") or "Not available"),
-                ("Maximum allowed speed", speed_text),
-            ],
-        )
-
-    def show_parking(self, number):
-        entity_id = f"urn:ngsi-ld:ParkingSpot:{number:04}"
-        rows = get_rows(smart_parking, entity_id)
-        latest = get_documents(rows)[-1]
-
-        self.show_results(
-            "Parking spot",
-            [
-                ("Spot ID", f"{number:04}"),
-                ("Status", get_value(latest, "status") or "Not available"),
-                ("Location", get_value(latest, "location") or "Not available"),
-            ],
-        )
-
+    # --- rota mais rápida ---
     def find_route(self):
         if self.route_busy:
             return
@@ -423,16 +469,16 @@ class SmartCityApp:
         hour_text = self.route_hour.get().strip()
 
         if not origin or not destination:
-            messagebox.showwarning("Missing street", "Choose or type both streets.", parent=self.root)
+            messagebox.showwarning("Rua em falta", "Indique a rua de origem e a de destino.", parent=self.root)
             return
         if hour_text and (not hour_text.isdigit() or int(hour_text) > 23):
-            messagebox.showwarning("Invalid hour", "Enter an hour from 0 to 23, or leave it empty.", parent=self.root)
+            messagebox.showwarning("Hora inválida", "Indique uma hora de 0 a 23, ou deixe vazio.", parent=self.root)
             return
         hour = int(hour_text) if hour_text else None
 
         self.route_busy = True
-        self.route_button.state(["disabled"])
-        self.status.set("Calculating route... the first run reads the large CSV files and can take a few minutes.")
+        self.route_button.configure(state="disabled")
+        self.status.set("A calcular a rota... a primeira vez lê os ficheiros grandes e pode demorar alguns minutos.")
 
         job = {}
 
@@ -455,19 +501,19 @@ class SmartCityApp:
             return
 
         self.route_busy = False
-        self.route_button.state(["!disabled"])
+        self.route_button.configure(state="normal")
 
         error = job.get("error")
         if error is not None:
-            self.status.set("Route lookup failed")
+            self.status.set("Falha a calcular a rota")
             if isinstance(error, fastest_route.AmbiguousStreet):
                 options = error.options
-                text = "Be more specific. Did you mean:\n- " + "\n- ".join(options[:8])
+                text = "Seja mais específico. Queria dizer:\n- " + "\n- ".join(options[:8])
                 if len(options) > 8:
-                    text += f"\n... and {len(options) - 8} more"
+                    text += f"\n... e mais {len(options) - 8}"
             else:
                 text = str(error)
-            messagebox.showerror("Unable to find a route", text, parent=self.root)
+            messagebox.showerror("Não foi possível calcular a rota", text, parent=self.root)
             return
 
         route = job["result"]
@@ -476,60 +522,216 @@ class SmartCityApp:
             for i, g in enumerate(fastest_route.group_steps(route["steps"]), 1)
         ]
         fields = [
-            ("Route", f"{route['origin']}  \u2192  {route['destination']}"),
-            ("Hour (UTC)", f"{route['hour']}h"),
-            ("Car travel time", fastest_route.format_duration(route["total_s"])),
-            ("Distance", f"{route['distance_m'] / 1000:.2f} km"),
-            ("Average speed", f"{fastest_route.average_speed_kmh(route):.0f} km/h"),
-            ("Moving time", fastest_route.format_duration(route["drive_s"])),
-            ("Delay at crosswalks", fastest_route.format_duration(route["wait_s"])),
-            ("Path", "\n".join(steps)),
+            ("Rota", f"{route['origin']}  →  {route['destination']}"),
+            ("Hora (UTC)", f"{route['hour']}h"),
+            ("Tempo de carro", fastest_route.format_duration(route["total_s"])),
+            ("Distância", f"{route['distance_m'] / 1000:.2f} km"),
+            ("Velocidade média", f"{fastest_route.average_speed_kmh(route):.0f} km/h"),
+            ("Tempo em movimento", fastest_route.format_duration(route["drive_s"])),
+            ("Atraso nas passadeiras", fastest_route.format_duration(route["wait_s"])),
+            ("Percurso", "\n".join(steps)),
         ]
-        notes = fastest_route.route_notes(route, lang="en")
+        notes = fastest_route.route_notes(route, lang="pt")
         if notes:
-            fields.append(("Notes", "\n".join(notes)))
+            fields.append(("Notas", "\n".join(notes)))
 
-        self.show_results("Fastest route by car", fields)
+        self.show_results("Rota mais rápida de carro", fields)
 
+    # --- rua mais próxima ---
     def find_nearest_road(self):
-        try:
-            temporary_label = tk.Label(self.root)
-            match = nearest_road(temporary_label)
+        self.nearest_road_button.configure(state="disabled")
+        self.status.set("A procurar a rua mais próxima...")
+        threading.Thread(target=self._lookup_nearest_road, daemon=True).start()
 
-            if not isinstance(match, dict) or not match.get("entityId"):
-                self.show_results("Nearest road", [("Result", "No road found nearby")])
+    def _lookup_nearest_road(self):
+        try:
+            latitude, longitude, *_ = locationCoordinates()
+            match = lookup_nearest_road(latitude, longitude)
+            if not match:
+                self.root.after(0, self._show_nearest_road_result, None, None, (latitude, longitude), None)
                 return
 
-            now = datetime.now().astimezone()
-            velocities = []
+            average_velocity = road_speed_text(match["entityId"], roadXcross.hour_now())
+            self.root.after(0, self._show_nearest_road_result, match, average_velocity,
+                            (latitude, longitude), None)
+        except BaseException as error:             # locationCoordinates() pode terminar com SystemExit sem rede
+            self.root.after(0, self._show_nearest_road_result, None, None, None, error)
 
-            rows = road_segments[road_segments["entityId"] == match["entityId"]]
-            for _, row in rows.iterrows():
-                observed_at = convertDate(row["eventTimestamp"]).astimezone(now.tzinfo)
-                if observed_at.hour == now.hour:
-                    velocity = get_value(json.loads(row["documentJson"]), "averageVelocity")
-                    if velocity is not None:
-                        velocities.append(float(velocity))
+    def _show_nearest_road_result(self, match, average_velocity, position, error):
+        self.nearest_road_button.configure(state="normal")
+        if error is not None:
+            self.status.set("Falha a procurar a rua mais próxima")
+            messagebox.showerror("Falha a procurar a rua mais próxima",
+                                 str(error) or "Sem ligação à internet?", parent=self.root)
+            return
 
-            average_velocity = (f"{st.mean(velocities) * 3.6:.2f} km/h" if velocities else "No data for this hour")
+        features = [{"kind": "marker", "position": position, "label": "A sua localização"}]
+        if match:
+            features += [{"kind": "road", "position": path, "label": match["name"] or ""}
+                         for path in _road_paths(match["entityId"])]
+        self.show_map_features(features)
 
-            self.show_results(
-                "Nearest road",
-                [("Road Name", match["name"]),
-                 ("Road entity ID", match["entityId"]),
-                 ("Average velocity", average_velocity),],
-            )
-        except Exception as error:
-            self.status.set("Nearest-road lookup failed")
-            messagebox.showerror(
-                "Unable to find nearest road",
-                str(error),
+        if not match:
+            self.show_results("Rua mais próxima", [("Resultado", "Não foram encontradas ruas na proximidade")])
+            return
+
+        self.show_results(
+            "Rua mais próxima",
+            [
+                ("Nome", match["name"] or "Sem nome"),
+                ("ID da rua", match["entityId"]),
+                ("Distância", f"{match['distance_m']:.1f} m"),
+                ("Velocidade média", average_velocity),
+            ],
+        )
+
+    # --- espera nas passadeiras ---
+    def analyze_wait(self):
+        raw_id = self.id_entry.get().strip()
+        time_text = self.wait_time_entry.get().strip()
+
+        if not raw_id.isdigit():
+            messagebox.showwarning("ID inválido", "Insira o ID numérico da passadeira.", parent=self.root)
+            return
+        if self.category.get() != "Smart crosswalk":
+            messagebox.showwarning(
+                "Categoria inválida",
+                "Selecione Smart crosswalk e insira o ID da passadeira.",
                 parent=self.root,
             )
-#=============================================================================================================
+            return
+
+        self.wait_button.configure(state="disabled")
+        self.status.set("A analisar tempo de espera...")
+        threading.Thread(target=self._wait_worker, args=(int(raw_id), time_text), daemon=True).start()
+
+    def _wait_worker(self, crosswalk_number, time_text):
+        try:
+            if self.wait_data is None:
+                self.wait_data = crosswalk_wait.load_crosswalk_data(str(DATA_DIR / "smartcrosswalk.csv"))
+
+            if not roadXcross.LINKS_CSV.exists():
+                roadXcross.build_links()
+
+            crosswalk_id = f"urn:ngsi-ld:SmartCrosswalk:{crosswalk_number:04d}"
+            result = crosswalk_wait.summarize_wait_time_by_time(self.wait_data, crosswalk_number, time_text)
+            features = _map_features([crosswalk_id])
+
+            self.root.after(0, self._show_wait_result, result, features, None)
+        except Exception as error:
+            self.root.after(0, self._show_wait_result, None, [], error)
+
+    def _show_wait_result(self, result, features, error):
+        self.wait_button.configure(state="normal")
+
+        if error is not None:
+            self.status.set("Falha a analisar tempo de espera")
+            messagebox.showerror("Falha na análise", str(error), parent=self.root)
+            return
+
+        self.show_map_features(features)
+
+        if result["status"] == "no_crosswalk":
+            self.status.set("Sem registos para esta passadeira")
+            messagebox.showinfo("Sem dados", "Não há registos para esta passadeira.", parent=self.root)
+            return
+        if result["status"] == "no_data":
+            self.status.set("Sem dados nesse intervalo")
+            messagebox.showinfo("Sem dados", "Não há tempos de espera válidos nesse intervalo.", parent=self.root)
+            return
+
+        fields = [
+            ("Intervalo UTC", f"{result['start']}–{result['end']}"),
+            ("Espera média", f"{result['average']:.2f} s"),
+            ("Mediana", f"{result['median']:.2f} s"),
+            ("Registos", result["records"]),
+            ("Dias distintos", result["days"]),
+        ]
+        warnings = []
+        if result["low_data"]:
+            warnings.append("Poucos dados: o valor é pouco fiável.")
+        if result["skewed"]:
+            warnings.append("A média é muito maior que a mediana: há esperas muito longas a puxá-la para cima.")
+        if warnings:
+            fields.append(("Aviso", "\n".join(warnings)))
+
+        self.show_results("Tempo de espera", fields)
+
+    # --- avisos da rua ---
+    def show_street_warnings(self):
+        street = self.street_entry.get().strip()
+        if not street:
+            messagebox.showwarning("Rua em falta", "Insira o nome da rua.", parent=self.root)
+            return
+
+        self.warning_button.configure(state="disabled")
+        self.status.set("A preparar avisos da rua...")
+        threading.Thread(target=self._warnings_worker, args=(street,), daemon=True).start()
+
+    def _warnings_worker(self, street):
+        try:
+            roadXcross.ensure_ready()
+            warnings = roadXcross.get_warnings(street=street)
+            crosswalk_ids = [warning["smartcrosswalk"] for warning in warnings]
+            features = _map_features(crosswalk_ids)
+
+            self.root.after(0, self._show_warnings, warnings, features, None)
+        except Exception as error:
+            self.root.after(0, self._show_warnings, None, [], error)
+
+    def _show_warnings(self, warnings, features, error):
+        self.warning_button.configure(state="normal")
+
+        if error is not None:
+            self.status.set("Falha ao carregar avisos")
+            messagebox.showerror("Falha ao carregar avisos", str(error), parent=self.root)
+            return
+
+        self.show_map_features(features)
+
+        if not warnings:
+            self.show_results("Avisos da rua", [("Resultado", "Sem passadeiras monitorizadas para esta rua.")])
+            return
+
+        self.show_results(
+            "Avisos da rua",
+            [
+                (f"Passadeira {warning['crosswalk']}", roadXcross.format_warning(warning, lang="pt"))
+                for warning in warnings
+            ],
+        )
+
+    # --- mapa ---
+    def show_map_features(self, features):
+        self.map_widget.delete_all_marker()
+        self.map_widget.delete_all_path()
+
+        points = []
+
+        for feature in features:
+            if feature["kind"] in ("crosswalk", "marker"):
+                lat, lon = feature["position"]
+                self.map_widget.set_marker(lat, lon, text=feature["label"])
+                points.append((lat, lon))
+            else:
+                path = feature["position"]
+                if len(path) >= 2:
+                    self.map_widget.set_path(path, width=3)
+                    points.extend(path)
+
+        if points:
+            center_lat = sum(point[0] for point in points) / len(points)
+            center_lon = sum(point[1] for point in points) / len(points)
+            self.map_widget.set_position(center_lat, center_lon)
+            self.map_widget.set_zoom(16)
+        else:
+            self.map_widget.set_position(40.64, -8.65)
+            self.map_widget.set_zoom(14)
+# ================================================================================================================
+
 
 def main():
-    root = tk.Tk()
+    root = ctk.CTk()
     SmartCityApp(root)
     root.mainloop()
 

@@ -24,11 +24,13 @@ Uso na linha de comandos (ou sem argumentos para abrir o menu):
 As horas são UTC (== hora de Aveiro em novembro). Só precisa de pandas e numpy.
 """
 import argparse
+import csv
 import difflib
 import hashlib
 import json
 import pickle
 import re
+import sys
 import time
 import unicodedata
 from datetime import datetime, timezone
@@ -82,9 +84,51 @@ def _flat(v):
     return v
 
 
+def read_ref_csv(path, **kwargs):
+    """Lê um CSV de referência (Crosswalk, SmartCrosswalk, RoadSegment...) mesmo que tenha sido guardado
+    pelo Excel: aceita BOM no início (que estraga o nome da 1.ª coluna), separador ';' ou tab e espaços
+    nos nomes das colunas. Se faltar a coluna entityId, diz que colunas encontrou."""
+    with open(path, encoding="utf-8-sig", errors="replace") as f:
+        first = f.readline()
+    sep = max((",", ";", "\t"), key=first.count)
+    df = pd.read_csv(path, sep=sep, encoding="utf-8-sig", **kwargs)
+    df.columns = [str(c).strip() for c in df.columns]
+    if "entityId" not in df.columns:
+        raise KeyError(f"{Path(path).name}: não encontrei a coluna 'entityId'. "
+                       f"Colunas lidas: {list(df.columns)[:8]} (separador detetado: {sep!r}). "
+                       f"Confirma se o ficheiro é o certo e se não está vazio ou danificado.")
+    return df
+
+
+def read_csv_safe(path, usecols=None, **kwargs):
+    """pd.read_csv que não rebenta com CSV truncado/corrompido (ex.: "EOF inside string"):
+    se o pandas falhar, lê com o módulo csv e fica só com as linhas completas e válidas."""
+    try:
+        return pd.read_csv(path, usecols=usecols, **kwargs)
+    except pd.errors.ParserError as error:
+        print(f"Aviso: {Path(path).name} parece truncado ou corrompido ({error}). "
+              f"A usar só as linhas válidas; confirma se o ficheiro está completo.")
+    csv.field_size_limit(sys.maxsize)
+    rows, bad = [], 0
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        try:
+            for row in reader:
+                if len(row) == len(header):
+                    rows.append(row)
+                else:
+                    bad += 1
+        except csv.Error:
+            bad += 1
+    print(f"  {len(rows):,} linhas válidas lidas, {bad} descartada(s).")
+    df = pd.DataFrame(rows, columns=header)
+    return df[list(usecols)] if usecols else df
+
+
 def load(path, keep=None):
     """Carrega um CSV do ATCLL e expande o documentJson em colunas normais."""
-    raw = pd.read_csv(path, usecols=["documentJson"])
+    raw = read_csv_safe(path, usecols=["documentJson"])
     df = pd.DataFrame([_flat(json.loads(s)) for s in raw["documentJson"]])
     return df[keep] if keep else df
 
@@ -147,9 +191,9 @@ def _names_match(a, b):
 # ------------------------------ 1) links ------------------------------------
 def build_links():
     """Liga cada passadeira aos segmentos de estrada à volta e grava crosswalk_road_links.csv."""
-    sc = pd.read_csv(REF_DIR / "SmartCrosswalk.csv")
-    cw = pd.read_csv(REF_DIR / "Crosswalk.csv").set_index("entityId")
-    rs = pd.read_csv(REF_DIR / "RoadSegment.csv")
+    sc = read_ref_csv(REF_DIR / "SmartCrosswalk.csv")
+    cw = read_ref_csv(REF_DIR / "Crosswalk.csv").set_index("entityId")
+    rs = read_ref_csv(REF_DIR / "RoadSegment.csv")
     lines = [_xy(json.loads(loc)["coordinates"]) for loc in rs["location"]]
     seg_names = [_segment_names(n) for n in rs["name"]]
 
