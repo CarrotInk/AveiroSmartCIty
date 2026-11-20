@@ -1,28 +1,3 @@
-"""
-roadXcross - ligação ruas <-> passadeiras e aviso de trânsito (ATCLL, Aveiro).
-
-Uso como módulo (no main):
-    import roadXcross
-
-    roadXcross.ensure_ready()                       # só constrói o que ainda não existir
-    avisos = roadXcross.get_warnings(segment_id="urn:ngsi-ld:RoadSegment:10956")
-    avisos = roadXcross.get_warnings(street="Avenida 25 de Abril", hour=8)
-    for a in avisos:
-        print(roadXcross.format_warning(a, lang="en"))
-
-Cada aviso é um dicionário:
-    crosswalk, smartcrosswalk, road_name, hour, level ("Livre"/"Moderado"/"Intenso"/"Sem dados"),
-    avg_wait_s, speed_ratio, avg_speed_kmh  (None quando não há dados fiáveis)
-
-Uso na linha de comandos (ou sem argumentos para abrir o menu):
-    python roadXcross.py links
-    python roadXcross.py profile --roads data/roadsegments_stats.csv
-    python roadXcross.py warn --street "Avenida 25 de Abril" --hour 8
-    python roadXcross.py warn --nearest                      # rua mais próxima da localização atual (road_match)
-    python roadXcross.py warn --nearest --lat 40.636 --lon -8.6466 --hour 8
-
-As horas são UTC (== hora de Aveiro em novembro). Só precisa de pandas e numpy.
-"""
 import argparse
 import csv
 import difflib
