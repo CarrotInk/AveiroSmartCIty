@@ -4,8 +4,8 @@ Um projeto em contexto de hackathon para explorar como dados reais podem ajudar 
 
 ## Objetivos do Projeto
 
-- **Mobilidade**: Melhorar a mobilidade pedestre e por carro pela cidade.
-- **Acessibilidade**: Tornar a informação mais acessível às pessoas para ser usada no dia a dia.
+- **Mobilidade** - Melhorar a mobilidade pedestre e por carro pela cidade.
+- **Acessibilidade** - Tornar a informação mais acessível às pessoas para ser usada no dia a dia.
 
 ## Funcionalidades:
 
