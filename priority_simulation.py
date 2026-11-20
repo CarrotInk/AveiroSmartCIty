@@ -43,6 +43,7 @@ ACCEL_MPS2 = 1.5            # aceleração ao retomar a marcha
 CLEAR_M = 25                # o condutor só arranca quando a ambulância já vai 25 m à sua frente
 AFTER_PASS_S = 40         # a simulação acaba 40 s depois de a ambulância passar (ou quando sai do raio)
 PEDESTRIAN_ALERT_RADIUS_M = 500
+PEDESTRIAN_LIGHT_INTERVAL_S = 5.0
 BUS_OVERTAKE_WAIT_S = 5
 BUS_CLEARANCE_M = 8
 AMBULANCE_ID = "urn:ngsi-ld:Vehicle:ambulance-01"
@@ -223,21 +224,35 @@ class Simulation:
         cx, cy = self.route.xy_at(self.crosswalk_s)
         return math.hypot(ax - cx, ay - cy)
 
+    def update_pedestrian_signal(self, pedestrian_distance):
+        """Mantém alternância normal e força vermelho a menos de 500 m."""
+        if self.amb_s >= self.crosswalk_s:
+            if self.pedestrian_signal != "verde":
+                self.pedestrian_signal = "verde"
+                self._log("A ambulância passou a passadeira. Semáforo para peões volta a VERDE.")
+            return
+
+        if pedestrian_distance <= PEDESTRIAN_ALERT_RADIUS_M:
+            if self.pedestrian_signal != "vermelho":
+                self.pedestrian_signal = "vermelho"
+                self.pedestrian_alerts.append((self.t, pedestrian_distance))
+                self._log(
+                    f"AVISO aos peões: ambulância a {pedestrian_distance:.0f} m. "
+                    "Semáforo para peões fica VERMELHO; aguarde antes de atravessar."
+                )
+            return
+
+        alternating_signal = "vermelho" if int(self.t // PEDESTRIAN_LIGHT_INTERVAL_S) % 2 else "verde"
+        if self.pedestrian_signal != alternating_signal:
+            self.pedestrian_signal = alternating_signal
+
     # --- um passo ---
     def step(self, dt):
         if self.finished:
             return
         self.t += dt
         pedestrian_distance = self.crosswalk_distance_m()
-        if (self.pedestrian_signal == "verde"
-                and self.amb_s < self.crosswalk_s
-                and pedestrian_distance <= PEDESTRIAN_ALERT_RADIUS_M):
-            self.pedestrian_signal = "vermelho"
-            self.pedestrian_alerts.append((self.t, pedestrian_distance))
-            self._log(
-                f"AVISO aos peões: ambulância a {pedestrian_distance:.0f} m. "
-                "Semáforo para peões fica VERMELHO; aguarde antes de atravessar."
-            )
+        self.update_pedestrian_signal(pedestrian_distance)
 
         if self.bus_wait_remaining > 0:
             self.bus_wait_remaining = max(0.0, self.bus_wait_remaining - dt)
@@ -260,9 +275,7 @@ class Simulation:
                 )
             else:
                 self.amb_s = next_amb_s
-        if self.pedestrian_signal == "vermelho" and self.amb_s >= self.crosswalk_s:
-            self.pedestrian_signal = "verde"
-            self._log("A ambulância passou a passadeira. Semáforo para peões volta a VERDE.")
+        self.update_pedestrian_signal(self.crosswalk_distance_m())
 
         self._drive_driver(dt)
         bus_lat, bus_lon = self.route.lonlat_at(self.bus_s)[::-1]
@@ -278,6 +291,9 @@ class Simulation:
             self.status = "aproxima-se"
             if self.driver_reacts and self.state == "a andar":
                 self._set_state("a reagir")
+
+        if not self.monitor.has_nearby_vehicle(AMBULANCE_ID) and self.status == "aproxima-se":
+            self.status = "livre"
 
         ahead = self.amb_s > self.driver_s
         if self.status == "aproxima-se" and ahead:
