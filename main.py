@@ -11,9 +11,9 @@ from location_time import locationCoordinates
 from road_match import find_nearest_road as lookup_nearest_road
 
 #===Load data=================================================================================================
-smart_crosswalk = pd.read_csv("data/smartcrosswalk.csv", nrows=1000)
-road_segments = pd.read_csv("data/roadsegments_stats.csv", nrows=1000)
-smart_parking = pd.read_csv("data/smartparking.csv", nrows=1000)
+smart_crosswalk = pd.read_csv("data/smartcrosswalk.csv")
+road_segments = pd.read_csv("data/roadsegments_stats.csv")
+smart_parking = pd.read_csv("data/smartparking.csv")
 #=============================================================================================================
 
 def convertDate(json_to_convert):
@@ -126,7 +126,7 @@ class SmartCityApp:
 
         ttk.Label(
             header,
-            text="Mobility and infrastructure data viewer",
+            text="Visualização de dados sobre mobilidade",
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(4, 0))
 
@@ -141,20 +141,20 @@ class SmartCityApp:
 
         ttk.Label(
             controls,
-            text="Look up a record",
+            text="Pesquisa um registo",
             style="Section.TLabel",
         ).pack(anchor="w")
 
         ttk.Label(
             controls,
-            text="Choose a category and enter its numeric ID.",
+            text="Escolha uma categoria e insira o id do elemento",
             style="Subtitle.TLabel",
             wraplength=210,
         ).pack(anchor="w", pady=(6, 18))
 
         ttk.Label(
             controls,
-            text="CATEGORY",
+            text="CATEGORIA",
             style="Field.TLabel",
         ).pack(anchor="w", pady=(0, 6))
 
@@ -185,7 +185,7 @@ class SmartCityApp:
 
         ttk.Button(
             controls,
-            text="Search",
+            text="Procurar",
             style="Action.TButton",
             command=self.search,
         ).pack(fill="x", pady=(0, 8))
@@ -194,7 +194,7 @@ class SmartCityApp:
 
         self.nearest_road_button = ttk.Button(
             controls,
-            text="Find nearest road",
+            text="Rua mais próxima",
             style="Action.TButton",
             command=self.find_nearest_road,
         )
@@ -214,7 +214,7 @@ class SmartCityApp:
 
         ttk.Label(
             result_card,
-            text="Results",
+            text="Resultado",
             style="Section.TLabel",
         ).grid(row=0, column=0, sticky="w", pady=(0, 16))
 
@@ -233,13 +233,13 @@ class SmartCityApp:
 
         ttk.Label(
             self.result_body,
-            text="Your results will appear here",
+            text="O resultado aparecerá aqui",
             style="Value.TLabel",
         ).pack(anchor="w", pady=(12, 4))
 
         ttk.Label(
             self.result_body,
-            text="Choose a data type and enter its ID to view the latest information.",
+            text="Escolha um tipo de dados e insira o seu ID",
             style="Subtitle.TLabel",
             wraplength=480,
             justify="left",
@@ -272,15 +272,15 @@ class SmartCityApp:
                 justify="left",
             ).pack(anchor="w", pady=(3, 0))
 
-        self.status.set("Information loaded successfully")
+        self.status.set("Informação carregada com sucesso")
 
     def search(self):
         raw_id = self.record_id.get().strip()
 
         if not raw_id.isdigit():
             messagebox.showwarning(
-                "Invalid ID",
-                "Enter a numeric record ID.",
+                "ID Invalido",
+                "Insira um ID n númerico",
                 parent=self.root,
             )
             self.id_entry.focus_set()
@@ -296,9 +296,9 @@ class SmartCityApp:
             else:
                 self.show_parking(number)
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
-            self.status.set("No matching record")
+            self.status.set("Sem registos correspondentes")
             messagebox.showerror(
-                "Unable to load record",
+                "Falha a carregar registo",
                 str(error),
                 parent=self.root,
             )
@@ -333,11 +333,11 @@ class SmartCityApp:
         self.show_results(
             "Smart crosswalk",
             [
-                ("Crosswalk ID", f"{number:04}"),
-                ("Observed by", get_value(latest, "observedBy") or "Not available"),
-                ("Average wait time", f"{average_wait} seconds"),
-                ("Average traverse time", f"{average_traverse} seconds"),
-                ("Records analyzed", len(documents)),
+                ("ID da passadeira", f"{number:04}"),
+                ("Observado por", get_value(latest, "observedBy") or "Not available"),
+                ("Tempo médio de espera", f"{average_wait} seconds"),
+                ("Tempo médio do precurso", f"{average_traverse} seconds"),
+                ("Registos analizados", len(documents)),
             ],
         )
 
@@ -350,14 +350,14 @@ class SmartCityApp:
         try:
             speed_text = f"{round(float(speed) * 3.6, 2)} km/h"
         except (TypeError, ValueError):
-            speed_text = "Not available"
+            speed_text = "Indisponivel"
 
         self.show_results(
             "Road segment",
             [
-                ("Road ID", f"{number:05}"),
-                ("Street", get_value(latest, "name") or "Not available"),
-                ("Maximum allowed speed", speed_text),
+                ("ID da rua", f"{number:05}"),
+                ("Rua", get_value(latest, "name") or "Indisponivel"),
+                ("Velocidade máxima permitida", speed_text),
             ],
         )
 
@@ -369,15 +369,15 @@ class SmartCityApp:
         self.show_results(
             "Parking spot",
             [
-                ("Spot ID", f"{number:04}"),
-                ("Status", get_value(latest, "status") or "Not available"),
-                ("Location", get_value(latest, "location") or "Not available"),
+                ("ID do espaço", f"{number:04}"),
+                ("Estado", get_value(latest, "status") or "Indisponivel"),
+                ("Localização", get_value(latest, "location") or "Indisponivel"),
             ],
         )
 
     def find_nearest_road(self):
         self.nearest_road_button.configure(state="disabled")
-        self.status.set("Finding nearest road...")
+        self.status.set("Á procura da rua mais próxima")
         threading.Thread(target=self._lookup_nearest_road, daemon=True).start()
 
     def _lookup_nearest_road(self):
@@ -404,7 +404,7 @@ class SmartCityApp:
             average_velocity = (
                 f"{st.mean(velocities) * 3.6:.2f} km/h"
                 if velocities
-                else "No data for this hour"
+                else "Sem registos para esta hora"
             )
             self.root.after(
                 0, self._show_nearest_road_result, match, average_velocity, None
@@ -417,25 +417,25 @@ class SmartCityApp:
     def _show_nearest_road_result(self, match, average_velocity, error):
         self.nearest_road_button.configure(state="normal")
         if error is not None:
-            self.status.set("Nearest-road lookup failed")
+            self.status.set("Falha a procurar a rua mais próxima")
             messagebox.showerror(
-                "Unable to find nearest road",
+                "Falha a procurar a rua mais próxima",
                 str(error),
                 parent=self.root,
             )
             return
 
         if not match:
-            self.show_results("Nearest road", [("Result", "No road found nearby")])
+            self.show_results("Rua mais próxima", [("Resultado", "Não foram encontradas ruas na próximidade")])
             return
 
         self.show_results(
-            "Nearest road",
+            "Rua mais próxima",
             [
-                ("Road Name", match["name"]),
-                ("Road entity ID", match["entityId"]),
-                ("Distance", f"{match['distance_m']:.1f} m"),
-                ("Average velocity", average_velocity),
+                ("Nome", match["name"]),
+                ("ID da rua", match["entityId"]),
+                ("Distância", f"{match['distance_m']:.1f} m"),
+                ("Velocidade média", average_velocity),
             ],
         )
 #=============================================================================================================
