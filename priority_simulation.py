@@ -166,6 +166,7 @@ class Simulation:
         self.pass_t = None
         self.amb_s = 0.0
         self.crosswalk_s = self.route.length / 2
+        self.ambulance_crossed_crosswalk = False
         self.pedestrian_signal = "verde"
         self.pedestrian_alerts = []
         self.bus_wait_remaining = 0.0
@@ -226,13 +227,12 @@ class Simulation:
 
     def update_pedestrian_signal(self, pedestrian_distance):
         """Mantém alternância normal e força vermelho a menos de 500 m."""
-        if self.amb_s >= self.crosswalk_s:
-            if self.pedestrian_signal != "verde":
-                self.pedestrian_signal = "verde"
-                self._log("A ambulância passou a passadeira. Semáforo para peões volta a VERDE.")
-            return
+        if self.amb_s >= self.crosswalk_s and not self.ambulance_crossed_crosswalk:
+            self.ambulance_crossed_crosswalk = True
+            self._log("A ambulância passou a passadeira. O semáforo retoma o ciclo normal.")
 
-        if pedestrian_distance <= PEDESTRIAN_ALERT_RADIUS_M:
+        if (self.amb_s < self.crosswalk_s
+                and pedestrian_distance <= PEDESTRIAN_ALERT_RADIUS_M):
             if self.pedestrian_signal != "vermelho":
                 self.pedestrian_signal = "vermelho"
                 self.pedestrian_alerts.append((self.t, pedestrian_distance))
@@ -606,7 +606,8 @@ class SimulationWindow:
                       f"Condutor:     {sim.state}\nAutocarro:    {bus_status}\n"
                       f"Passadeira:   {pedestrian_distance:6.0f} m\n"
                       f"Semáforo peões: {pedestrian_status}\nPercurso:     {sim.route.length / 1000:.1f} km")
-        if sim.pedestrian_signal == "vermelho":
+        if (sim.pedestrian_signal == "vermelho"
+                and pedestrian_distance <= PEDESTRIAN_ALERT_RADIUS_M):
             blink = int(time.time() * 2) % 2 == 0
             self.banner.config(
                 bg=self.RED if blink else "#991B1B",
