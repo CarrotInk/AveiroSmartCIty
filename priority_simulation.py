@@ -43,6 +43,8 @@ ACCEL_MPS2 = 1.5            # aceleração ao retomar a marcha
 CLEAR_M = 25                # o condutor só arranca quando a ambulância já vai 25 m à sua frente
 AFTER_PASS_S = 40         # a simulação acaba 40 s depois de a ambulância passar (ou quando sai do raio)
 PEDESTRIAN_ALERT_RADIUS_M = 500
+BUS_OVERTAKE_WAIT_S = 5
+BUS_CLEARANCE_M = 8
 AMBULANCE_ID = "urn:ngsi-ld:Vehicle:ambulance-01"
 BUS_ID = "urn:ngsi-ld:Vehicle:bus-12"
 
@@ -127,12 +129,14 @@ def build_route(origin, destination, segments=None, geometry=None):
 
 # ------------------------------ simulação -----------------------------------
 class Simulation:
-    """Ambulância (atrás) e condutor (à frente) no mesmo percurso, mais um autocarro que não gera avisos."""
+    """Simula a ambulância, um condutor e um autocarro com reação opcional aos avisos."""
 
-    def __init__(self, route, radius_m=DEFAULT_ALERT_RADIUS_M, driver_reacts=True, start_gap_m=START_GAP_M):
+    def __init__(self, route, radius_m=DEFAULT_ALERT_RADIUS_M, driver_reacts=True,
+                 start_gap_m=START_GAP_M, bus_reacts=False):
         self.route = route
         self.radius_m = float(radius_m)
         self.driver_reacts = driver_reacts
+        self.bus_reacts = bus_reacts
         self.gap_m = self._initial_gap(start_gap_m)
         self.on_event = None                      # função(t, texto) opcional, usada pela janela
         self.events = []
@@ -163,8 +167,14 @@ class Simulation:
         self.crosswalk_s = self.route.length / 2
         self.pedestrian_signal = "verde"
         self.pedestrian_alerts = []
-        self.driver_s = self.gap_m
-        self.bus_s = self.gap_m + 250
+        self.bus_wait_remaining = 0.0
+        self.bus_wait_count = 0
+        self.bus_wait_done = False
+        self.driver_s = min(self.gap_m, self.crosswalk_s)
+        self.bus_s = min(self.gap_m + 250, self.crosswalk_s)
+        self.bus_v = _kmh(BUS_KMH)
+        self.bus_state = "a andar"
+        self.bus_state_t = 0.0
         self.driver_v = _kmh(DRIVER_KMH)
         self.state = "a andar"            # a andar -> a reagir -> a travar -> parado -> a retomar
         self.state_t = 0.0
@@ -172,6 +182,7 @@ class Simulation:
         self.alerts = []
         self.finished = False
         self.monitor = PriorityVehicleMonitor(self.radius_m, notifier=self._notify)   # sem memória de alertas
+        self.bus_monitor = PriorityVehicleMonitor(self.radius_m, notifier=self._notify_bus)
         self.events.clear()
         self._log(f"Início: condutor a {_kmh_text(self.driver_v)}, ambulância {self.gap_m:.0f} m atrás.")
 
@@ -183,6 +194,10 @@ class Simulation:
 
     def _notify(self, message):                   # chamado pelo PriorityVehicleMonitor
         self._log(f"AVISO ao condutor: {message}")
+
+    def _notify_bus(self, message):
+        if self.bus_reacts and self.bus_state == "a andar":
+            self._log(f"AVISO ao condutor do autocarro: {message}")
 
     # --- dados que o sistema de localização enviaria ---
     def vehicles(self):
@@ -203,14 +218,59 @@ class Simulation:
         dx, dy = self.route.xy_at(self.driver_s)
         return math.hypot(ax - dx, ay - dy)
 
+    def crosswalk_distance_m(self):
+        ax, ay = self.route.xy_at(self.amb_s)
+        cx, cy = self.route.xy_at(self.crosswalk_s)
+        return math.hypot(ax - cx, ay - cy)
+
     # --- um passo ---
     def step(self, dt):
         if self.finished:
             return
         self.t += dt
-        self.amb_s += _kmh(AMBULANCE_KMH) * dt
-        self.bus_s += _kmh(BUS_KMH) * dt
+        pedestrian_distance = self.crosswalk_distance_m()
+        if (self.pedestrian_signal == "verde"
+                and self.amb_s < self.crosswalk_s
+                and pedestrian_distance <= PEDESTRIAN_ALERT_RADIUS_M):
+            self.pedestrian_signal = "vermelho"
+            self.pedestrian_alerts.append((self.t, pedestrian_distance))
+            self._log(
+                f"AVISO aos peões: ambulância a {pedestrian_distance:.0f} m. "
+                "Semáforo para peões fica VERMELHO; aguarde antes de atravessar."
+            )
+
+        if self.bus_wait_remaining > 0:
+            self.bus_wait_remaining = max(0.0, self.bus_wait_remaining - dt)
+            self.amb_s = max(0.0, self.bus_s - BUS_CLEARANCE_M)
+            if self.bus_wait_remaining == 0:
+                self.bus_wait_done = True
+                self._log("A ambulância pode agora ultrapassar o autocarro.")
+        else:
+            next_amb_s = self._advance_road_vehicle(self.amb_s, _kmh(AMBULANCE_KMH), dt)
+            bus_following_limit = max(0.0, self.bus_s - BUS_CLEARANCE_M)
+            if (not self.bus_wait_done
+                    and next_amb_s >= bus_following_limit
+                    and self.amb_s < bus_following_limit):
+                self.bus_wait_remaining = BUS_OVERTAKE_WAIT_S
+                self.bus_wait_count += 1
+                self.amb_s = bus_following_limit
+                self._log(
+                    f"A ambulância alcançou o autocarro e espera "
+                    f"{BUS_OVERTAKE_WAIT_S} segundos antes de o ultrapassar."
+                )
+            else:
+                self.amb_s = next_amb_s
+        if self.pedestrian_signal == "vermelho" and self.amb_s >= self.crosswalk_s:
+            self.pedestrian_signal = "verde"
+            self._log("A ambulância passou a passadeira. Semáforo para peões volta a VERDE.")
+
         self._drive_driver(dt)
+        bus_lat, bus_lon = self.route.lonlat_at(self.bus_s)[::-1]
+        for alert in self.bus_monitor.update(self.vehicles(), bus_lat, bus_lon):
+            if self.bus_reacts and self.bus_state == "a andar":
+                self.bus_state, self.bus_state_t = "a reagir", 0.0
+                self._log("O condutor do autocarro recebe o aviso e prepara-se para encostar.")
+        self._drive_bus(dt)
 
         lat, lon = self.driver_position()
         for alert in self.monitor.update(self.vehicles(), lat, lon):
@@ -218,19 +278,6 @@ class Simulation:
             self.status = "aproxima-se"
             if self.driver_reacts and self.state == "a andar":
                 self._set_state("a reagir")
-
-        pedestrian_distance = self.crosswalk_s - self.amb_s
-        if (self.pedestrian_signal == "verde"
-                and 0 < pedestrian_distance <= PEDESTRIAN_ALERT_RADIUS_M):
-            self.pedestrian_signal = "vermelho"
-            self.pedestrian_alerts.append((self.t, pedestrian_distance))
-            self._log(
-                f"AVISO aos peões: ambulância a {pedestrian_distance:.0f} m. "
-                "Semáforo para peões fica VERMELHO; aguarde antes de atravessar."
-            )
-        elif self.pedestrian_signal == "vermelho" and self.amb_s >= self.crosswalk_s:
-            self.pedestrian_signal = "verde"
-            self._log("A ambulância passou a passadeira. Semáforo para peões volta a VERDE.")
 
         ahead = self.amb_s > self.driver_s
         if self.status == "aproxima-se" and ahead:
@@ -265,7 +312,37 @@ class Simulation:
             self.driver_v = min(cruise, self.driver_v + ACCEL_MPS2 * dt)
             if self.driver_v >= cruise:
                 self.state = "a andar"
-        self.driver_s = min(self.driver_s + self.driver_v * dt, self.route.length)
+        self.driver_s = self._advance_road_vehicle(self.driver_s, self.driver_v, dt)
+
+    def _drive_bus(self, dt):
+        self.bus_state_t += dt
+        if self.bus_state == "a reagir" and self.bus_state_t >= REACTION_S:
+            self.bus_state, self.bus_state_t = "a travar", 0.0
+            self._log("O autocarro começa a encostar para deixar a ambulância passar.")
+        elif self.bus_state == "a travar":
+            self.bus_v = max(0.0, self.bus_v - BRAKE_MPS2 * dt)
+            if self.bus_v == 0:
+                self.bus_state = "encostado"
+                self.bus_state_t = 0.0
+                self._log("O autocarro está encostado.")
+        elif self.bus_state == "encostado" and self.amb_s > self.bus_s + CLEAR_M:
+            self.bus_state, self.bus_state_t = "a retomar", 0.0
+            self._log("A ambulância passou; o autocarro retoma a marcha.")
+        elif self.bus_state == "a retomar":
+            self.bus_v = min(_kmh(BUS_KMH), self.bus_v + ACCEL_MPS2 * dt)
+            if self.bus_v >= _kmh(BUS_KMH):
+                self.bus_state = "a andar"
+
+        if self.bus_state != "encostado":
+            self.bus_s = self._advance_road_vehicle(self.bus_s, self.bus_v, dt)
+
+    def _advance_road_vehicle(self, position, speed, dt):
+        next_position = min(position + speed * dt, self.route.length)
+        if (self.pedestrian_signal == "verde"
+                and position <= self.crosswalk_s
+                and next_position > self.crosswalk_s):
+            return self.crosswalk_s
+        return next_position
 
 
 def _kmh_text(mps):
@@ -296,6 +373,7 @@ class SimulationWindow:
         self.radius_var = tk.StringVar(value=str(int(radius_m)))
         self.speed_var = tk.StringVar(value="5x")
         self.reacts_var = tk.BooleanVar(value=True)
+        self.bus_reacts_var = tk.BooleanVar(value=False)
         self.from_var, self.to_var = tk.StringVar(value=origin), tk.StringVar(value=destination)
         self.build_ui()
         self.load_scenario(origin, destination)
@@ -339,6 +417,12 @@ class SimulationWindow:
                 box.bind("<<ComboboxSelected>>", lambda e: self.apply_settings())
         ttk.Checkbutton(right, text="O condutor encosta quando avisado", variable=self.reacts_var,
                         command=self.apply_settings).pack(fill="x", pady=(0, 8))
+        ttk.Checkbutton(
+            right,
+            text="O condutor do autocarro recebe avisos e encosta",
+            variable=self.bus_reacts_var,
+            command=self.apply_settings,
+        ).pack(fill="x", pady=(0, 8))
 
         for text, var in (("ORIGEM DA AMBULÂNCIA", self.from_var), ("DESTINO", self.to_var)):
             label(text).pack(fill="x")
@@ -373,7 +457,12 @@ class SimulationWindow:
     def apply_settings(self):
         self.running = False
         self.play_button.config(text="Iniciar")
-        self.sim = Simulation(self.route, float(self.radius_var.get()), self.reacts_var.get())
+        self.sim = Simulation(
+            self.route,
+            float(self.radius_var.get()),
+            self.reacts_var.get(),
+            bus_reacts=self.bus_reacts_var.get(),
+        )
         self.log.delete(0, "end")
         self.sim.on_event = self.add_log
         self.log.insert("end", f"[{_mmss(0)}] {self.sim.events[0][1]}")
@@ -442,8 +531,13 @@ class SimulationWindow:
         self.to_px = to_px
         c.tag_lower("static")
 
-    def dot(self, s, color, text, r=9, below=False):
-        px, py = self.to_px(*self.route.xy_at(s))
+    def dot(self, s, color, text, r=9, below=False, lateral_offset=0):
+        x, y = self.route.xy_at(s)
+        if lateral_offset:
+            direction = self.route.direction_at(s)
+            x -= direction[1] * lateral_offset
+            y += direction[0] * lateral_offset
+        px, py = self.to_px(x, y)
         self.canvas.create_oval(px - r, py - r, px + r, py + r, fill=color, outline="white", width=2, tags="dyn")
         self.canvas.create_text(px, py + (r + 10 if below else -r - 10), text=text, fill=self.NAVY,
                                 font=("Segoe UI", 9, "bold"), tags="dyn")
@@ -458,7 +552,14 @@ class SimulationWindow:
         r = sim.radius_m * self._scale
         c.create_oval(px - r, py - r, px + r, py + r, outline=self.RED if sim.status == "aproxima-se" else "#9AA7BA",
                       dash=(6, 4), width=2, tags="dyn")
-        self.dot(sim.bus_s, "#8A94A6", "Autocarro", r=6)
+        bus_pulled_over = sim.bus_state == "encostado"
+        self.dot(
+            sim.bus_s,
+            "#F59E0B" if bus_pulled_over else "#8A94A6",
+            "Autocarro (encostado)" if bus_pulled_over else "Autocarro",
+            r=6,
+            lateral_offset=12 if bus_pulled_over else 0,
+        )
         self.dot(sim.driver_s, self.BLUE, "Condutor", below=True)
         self.dot(sim.amb_s, self.RED, "Ambulância")
         crosswalk_x, crosswalk_y = self.route.xy_at(sim.crosswalk_s)
@@ -480,11 +581,14 @@ class SimulationWindow:
                       font=("Segoe UI", 9, "bold"), tags="dyn")
 
         gap = sim.distance_m()
-        pedestrian_distance = max(0, sim.crosswalk_s - sim.amb_s)
+        pedestrian_distance = sim.crosswalk_distance_m()
         pedestrian_status = sim.pedestrian_signal.upper()
+        bus_status = (f"espera {sim.bus_wait_remaining:.1f} s"
+                      if sim.bus_wait_remaining > 0 else sim.bus_state)
         self.info.set(f"Tempo:        {_mmss(sim.t)}\nDistância:    {gap:6.0f} m\n"
                       f"Ambulância:   {AMBULANCE_KMH:6.0f} km/h\nCondutor:     {sim.driver_v * 3.6:6.0f} km/h\n"
-                      f"Condutor:     {sim.state}\nPassadeira:   {pedestrian_distance:6.0f} m\n"
+                      f"Condutor:     {sim.state}\nAutocarro:    {bus_status}\n"
+                      f"Passadeira:   {pedestrian_distance:6.0f} m\n"
                       f"Semáforo peões: {pedestrian_status}\nPercurso:     {sim.route.length / 1000:.1f} km")
         if sim.pedestrian_signal == "vermelho":
             blink = int(time.time() * 2) % 2 == 0
