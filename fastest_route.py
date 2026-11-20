@@ -126,7 +126,14 @@ def load_speeds_and_waits(segment_ids, roads_path=None):
             pass
 
     if roads_path.exists():
-        raw = rx._road_speeds(list(segment_ids), roads_path)      # cache partilhada: só lê o CSV se faltar algo
+        try:
+            raw = rx._road_speeds(list(segment_ids), roads_path)  # cache partilhada: só lê o CSV se faltar algo
+        except pd.errors.ParserError as error:
+            print(
+                f"Aviso: não foi possível ler todas as velocidades de {roads_path.name} "
+                f"({error}). A rota usará as velocidades de referência e os limites das ruas."
+            )
+            raw = pd.DataFrame(columns=["segment_id", "hour", "speed_mps", "n"])
         if IGNORE_ZERO_SPEED:
             raw = raw[raw["speed_mps"] > 0]
         speeds = raw.groupby(["segment_id", "hour"])["speed_mps"].agg(speed_mps="mean", n="size").reset_index()
