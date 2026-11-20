@@ -22,6 +22,11 @@ Um projeto em contexto de hackathon para explorar como dados reais podem ajudar 
 - `Data available.json` — Ficheiro complementar para ajudar a compreender os dados durante o desenvolvimento.
 - `Simulataions` - Uma pasta com simulações à parte da app, com objetivo de simular eventos reais.
 
+## Ferramentas Utilizadas
+
+- **IDE** - Pycharm e Visual Studio Code
+- **AI** - Claude e Github Copilot
+
 ## Acknowledgements
 
 Feito como projeto da hackathon **Aveiro City Hackathon / Tech Week 2026** pela equipa:
