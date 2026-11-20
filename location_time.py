@@ -6,7 +6,8 @@ import datetime
 
 def locationCoordinates():
     try:
-        response = requests.get('https://ipinfo.io')
+        response = requests.get("https://ipinfo.io", timeout=10)
+        response.raise_for_status()
         data = response.json()
         pprint(data)
         loc = data['loc'].split(',')

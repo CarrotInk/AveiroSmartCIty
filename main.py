@@ -371,12 +371,28 @@ class SmartCityApp:
             temporary_label = tk.Label(self.root)
             match = nearest_road(temporary_label)
 
-            if not isinstance(match, dict) or "entityId" not in match:
-                raise ValueError("No nearest-road result was returned.")
+            if not isinstance(match, dict) or not match.get("entityId"):
+                self.show_results("Nearest road", [("Result", "No road found nearby")])
+                return
+
+            now = datetime.now().astimezone()
+            velocities = []
+
+            rows = road_segments[road_segments["entityId"] == match["entityId"]]
+            for _, row in rows.iterrows():
+                observed_at = convertDate(row["eventTimestamp"]).astimezone(now.tzinfo)
+                if observed_at.hour == now.hour:
+                    velocity = get_value(json.loads(row["documentJson"]), "averageVelocity")
+                    if velocity is not None:
+                        velocities.append(float(velocity))
+
+            average_velocity = (f"{st.mean(velocities) * 3.6:.2f} km/h" if velocities else "No data for this hour")
 
             self.show_results(
                 "Nearest road",
-                [("Road Name", match["name"]), ("Road entity ID", match["entityId"])],
+                [("Road Name", match["name"]),
+                 ("Road entity ID", match["entityId"]),
+                 ("Average velocity", average_velocity),],
             )
         except Exception as error:
             self.status.set("Nearest-road lookup failed")

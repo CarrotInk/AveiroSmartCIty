@@ -121,7 +121,7 @@ def find_nearest_road(latitude, longitude, csv_path, max_distance_m=4000):
                     print(f"Skipping invalid road coordinates: {error}")
                     continue
 
-                if nearest is None or distance < nearest["distance_m"]:
+                if nearest is None or distance > nearest["distance_m"]:
                     nearest = {
                         "entityId": row.entityId,
                         "name": document.get("name"),
