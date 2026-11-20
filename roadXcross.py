@@ -18,13 +18,18 @@ Uso na linha de comandos (ou sem argumentos para abrir o menu):
     python roadXcross.py links
     python roadXcross.py profile --roads data/roadsegments_stats.csv
     python roadXcross.py warn --street "Avenida 25 de Abril" --hour 8
+    python roadXcross.py warn --nearest                      # rua mais próxima da localização atual (road_match)
+    python roadXcross.py warn --nearest --lat 40.636 --lon -8.6466 --hour 8
 
 As horas são UTC (== hora de Aveiro em novembro). Só precisa de pandas e numpy.
 """
 import argparse
 import difflib
+import hashlib
 import json
+import pickle
 import re
+import time
 import unicodedata
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -40,6 +45,7 @@ REF_DIR = EVENTS_DIR / "reference-entities"       # Crosswalk.csv, SmartCrosswal
 ROADS_CSV = EVENTS_DIR / "roadsegments_stats.csv"
 LINKS_CSV = BASE_DIR / "crosswalk_road_links.csv"
 PROFILE_CSV = BASE_DIR / "crosswalk_hourly_profile.csv"
+SPEEDS_CACHE = BASE_DIR / "road_speeds_cache.pkl"   # evita reler o ficheiro grande de cada vez
 
 MAX_DIST_M = 30        # raio de procura de segmentos à volta da passadeira
 FALLBACK_DIST_M = 15   # se nenhum segmento tiver o nome certo, usa só os que estão colados
@@ -188,35 +194,75 @@ def _crosswalk_waits():
     return cw.groupby(["entityId", "hour"])["wait_time"].agg(avg_wait_s="mean", n_wait="size").reset_index()
 
 
-def _road_speeds(segment_ids, path, chunksize=100_000):
-    """Lê o ficheiro grande aos bocados e só faz parse JSON dos segmentos que interessam."""
+def _num(x):
+    """Número a partir de um valor Extended JSON ({"$numberDouble": "1.5"}) ou de um número normal."""
+    if isinstance(x, dict):
+        for k in ("$numberDouble", "$numberInt", "$numberLong"):
+            if k in x:
+                return float(x[k])
+        return None
+    return float(x) if isinstance(x, (int, float)) else None
+
+
+def _hour_utc(ts):
+    """Hora (UTC) de um eventTimestamp Extended JSON, sem criar objetos datetime (muito mais rápido)."""
+    v = ts["$date"]
+    if isinstance(v, dict):
+        return int(int(v["$numberLong"]) // 3_600_000 % 24)
+    return pd.to_datetime(v, utc=True).hour
+
+
+def _road_speeds(segment_ids, path, chunksize=100_000, use_cache=True):
+    """Lê o ficheiro grande aos bocados e só faz parse JSON dos segmentos que interessam.
+    O resultado fica em cache (road_speeds_cache.pkl) enquanto o ficheiro e os segmentos não mudarem."""
+    path = Path(path)
     keep = set(segment_ids)
-    out, bad = [], 0
-    for chunk in pd.read_csv(path, usecols=["entityId", "documentJson"], chunksize=chunksize):
+    st = path.stat()
+    key = hashlib.md5(repr((str(path), st.st_size, int(st.st_mtime), sorted(keep), CAMERA_IN_KMH,
+                            MAX_SPEED_MPS)).encode()).hexdigest()
+    if use_cache and SPEEDS_CACHE.exists():
+        try:
+            cached = pickle.loads(SPEEDS_CACHE.read_bytes())
+            if cached["key"] == key:
+                print("Velocidades das estradas lidas da cache (apaga road_speeds_cache.pkl para forçar nova leitura).")
+                return cached["df"]
+        except Exception:
+            pass
+
+    print(f"A ler {path.name} ({st.st_size / 1e9:.2f} GB). Pode demorar vários minutos, não está bloqueado...")
+    t0 = time.time()
+    out, bad, rows_read = [], 0, 0
+    for chunk in pd.read_csv(path, usecols=["entityId", "documentJson"], chunksize=chunksize, dtype=str):
+        rows_read += len(chunk)
         chunk = chunk[chunk["entityId"].isin(keep)]
         for s in chunk["documentJson"]:
             try:
-                d = _flat(json.loads(s))
-            except ValueError:           # linha cortada/corrompida: ignora
+                d = json.loads(s)
+                v = _num(d.get("averageVelocity"))
+                if v is None:
+                    continue
+                lim = d.get("maxAllowedVelocity")
+                lim = [x for x in map(_num, lim) if x is not None] if isinstance(lim, list) else []
+                limit = float(np.mean(lim)) if lim else np.nan
+                sensor = d.get("sensorType")
+                if CAMERA_IN_KMH and sensor == "Camera":
+                    v = v / 3.6
+                if not (0 <= v <= MAX_SPEED_MPS):
+                    continue
+                out.append((d["entityId"], _hour_utc(d["eventTimestamp"]), v,
+                            v / limit if limit > 0 else np.nan, sensor))
+            except (ValueError, KeyError, TypeError):     # linha cortada/corrompida: ignora
                 bad += 1
-                continue
-            limit = d.get("maxAllowedVelocity")
-            limit = float(np.mean(limit)) if isinstance(limit, list) and limit else np.nan
-            v = d.get("averageVelocity")
-            if v is None:
-                continue
-            sensor = d.get("sensorType")
-            if CAMERA_IN_KMH and sensor == "Camera":
-                v = v / 3.6
-            if not (0 <= v <= MAX_SPEED_MPS):
-                continue
-            out.append((d["entityId"], d["eventTimestamp"].hour, v, v / limit if limit > 0 else np.nan, sensor))
+        print(f"  {rows_read:,} linhas lidas | {len(out):,} úteis | {time.time() - t0:.0f}s")
+
     df = pd.DataFrame(out, columns=["segment_id", "hour", "speed_mps", "speed_ratio", "sensor"])
     if bad:
         print(f"Aviso: {bad} linha(s) com JSON inválido ignorada(s).")
     if len(df):
         med = df.groupby("sensor")["speed_ratio"].median().round(2).to_dict()
         print(f"Verificação de unidades - mediana velocidade/limite por sensor: {med}")
+    if use_cache:
+        SPEEDS_CACHE.write_bytes(pickle.dumps({"key": key, "df": df}))
     return df
 
 
@@ -225,6 +271,7 @@ def build_profile(roads_path=None):
     links = pd.read_csv(LINKS_CSV)
     used = links[links["use_for_alert"]]
 
+    print("A ler as esperas das passadeiras (~20-60 s)...")
     waits = _crosswalk_waits()
     waits["smartcrosswalk"] = waits["entityId"]
 
@@ -364,10 +411,41 @@ def format_warning(w, lang="pt"):
     return f"{head}: {t['traffic']} {t['levels'][w['level']]} {t['at']} {w['hour']}h - " + ", ".join(parts)
 
 
-def warn(street, hour):
-    """Compatibilidade com a versão antiga: lista de textos para uma rua e hora."""
+def nearest_road_match(lat=None, lon=None):
+    """Rua mais próxima segundo o road_match: dict(entityId, name, distance_m) ou None.
+    Sem lat/lon usa a localização atual (location_time.locationCoordinates, como o main)."""
+    import road_match            # import tardio: só é preciso aqui (e assim o roadXcross funciona sem ele)
+    if lat is not None and lon is not None:
+        match = road_match.find_nearest_road(float(lat), float(lon))
+    else:
+        match = road_match.nearest_road()
+    return match if match and match.get("entityId") else None
+
+
+def get_warnings_nearest(hour=None, lat=None, lon=None, match=None):
+    """Avisos para a rua mais próxima. Devolve (match, avisos).
+    `match` permite passar o resultado do road_match que o main já tenha (evita procurar outra vez)."""
+    match = match if match and match.get("entityId") else nearest_road_match(lat, lon)
+    if not match:
+        return None, []
+    return match, get_warnings(segment_id=match["entityId"], street=match.get("name"), hour=hour)
+
+
+def warn(street=None, hour=None, nearest=False, lat=None, lon=None, match=None, lang="pt"):
+    """Lista de textos de aviso. Com nearest=True (ou sem `street`) usa a rua mais próxima dada
+    pelo road_match; caso contrário usa a rua indicada. `hour` por defeito é a hora atual (UTC)."""
+    hour = hour_now() if hour is None else int(hour)
+
+    if nearest or match is not None or not street:
+        match, ws = get_warnings_nearest(hour, lat, lon, match)
+        if not match:
+            return ["Não foi encontrada nenhuma rua próxima."]
+        dist = match.get("distance_m")
+        head = f"Rua mais próxima: {match.get('name') or match['entityId']}" + (f" ({dist:.0f} m)" if dist else "")
+        return [head] + ([format_warning(w, lang) for w in ws] or ["Sem passadeiras monitorizadas nesta rua."])
+
     ws = get_warnings(street=street, hour=hour)
-    return [format_warning(w) for w in ws] or [f"Sem passadeiras monitorizadas em '{street}'."]
+    return [format_warning(w, lang) for w in ws] or [f"Sem passadeiras monitorizadas em '{street}'."]
 
 
 # ------------------------------- CLI ----------------------------------------
@@ -376,19 +454,34 @@ def _print_links():
     print(l[l["use_for_alert"]].groupby("smartcrosswalk")["match_type"].agg(["first", "size"]))
 
 
+def _ask_coords():
+    raw = input("Não consegui obter a localização. Escreve 'lat, lon' (Enter para cancelar): ").strip()
+    if not raw:
+        return None
+    lat, lon = (float(x) for x in raw.split(","))
+    return lat, lon
+
+
 def _menu():
     while True:
         op = input("\nlinks (1)  |  profile (2)  |  warn (3)  |  Exit (4)\n").strip()
         if op == "1":
             _print_links()
         elif op == "2":
-            roads = input(f"Ficheiro das estradas (Enter = {ROADS_CSV}, 'n' = sem velocidades): ").strip()
+            roads = input(f"Ficheiro das estradas - carrega Enter para usar {ROADS_CSV} (demora alguns minutos) ou escreve 'n' para ignorar as velocidades: ").strip()
             path = None if roads.lower() == "n" else (roads or ROADS_CSV)
             print(build_profile(path).head(24))
         elif op == "3":
-            street = input("Rua: ").strip()
-            hour = int(input("Hora (0-23): "))
-            print("\n".join(warn(street, hour)))
+            street = input("Rua (Enter = rua mais próxima da tua localização): ").strip()
+            hour = input("Hora (0-23, Enter = agora): ").strip()
+            hour = int(hour) if hour else None
+            try:
+                print("\n".join(warn(street or None, hour)))
+            except Exception as error:               # location_time/road_match indisponíveis, sem rede, etc.
+                print(f"Erro ao obter a rua mais próxima: {error}")
+                coords = _ask_coords() if not street else None
+                if coords:
+                    print("\n".join(warn(None, hour, nearest=True, lat=coords[0], lon=coords[1])))
         elif op == "4":
             break
 
@@ -398,7 +491,11 @@ if __name__ == "__main__":
     sub = ap.add_subparsers(dest="cmd")          # sem comando -> abre o menu
     sub.add_parser("links")
     p = sub.add_parser("profile"); p.add_argument("--roads", help="roadsegments_stats.csv")
-    w = sub.add_parser("warn"); w.add_argument("--street", required=True); w.add_argument("--hour", type=int, required=True)
+    w = sub.add_parser("warn")
+    w.add_argument("--street", help="nome da rua (se omitido, usa a rua mais próxima)")
+    w.add_argument("--nearest", action="store_true", help="usar a rua mais próxima (road_match)")
+    w.add_argument("--lat", type=float); w.add_argument("--lon", type=float)
+    w.add_argument("--hour", type=int, help="0-23 (UTC); por defeito a hora atual")
     a = ap.parse_args()
 
     if a.cmd is None:
@@ -408,4 +505,4 @@ if __name__ == "__main__":
     elif a.cmd == "profile":
         print(build_profile(a.roads).head(24))
     else:
-        print("\n".join(warn(a.street, a.hour)))
+        print("\n".join(warn(a.street, a.hour, nearest=a.nearest, lat=a.lat, lon=a.lon)))

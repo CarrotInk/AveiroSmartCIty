@@ -1,11 +1,13 @@
 import json
 import math
-from asyncio.windows_events import NULL
+from pathlib import Path
 
 import pandas as pd
-from location_time import locationCoordinates
 
 EARTH_RADIUS_M = 6_371_000
+# Ficheiro pequeno de referência (1 linha por segmento). O roadsegments_stats.csv tem 1,68 milhões
+# de linhas e repete os mesmos 1436 segmentos, por isso não compensa lê-lo para achar a rua mais próxima.
+ROAD_CSV = Path(__file__).resolve().parent / "data" / "reference-entities" / "RoadSegment.csv"
 
 def haversine_m(lat1, lon1, lat2, lon2):
     lat1, lat2 = math.radians(lat1), math.radians(lat2)
@@ -101,15 +103,34 @@ def road_coordinates(document_json):
     return None, document
 
 
-def find_nearest_road(latitude, longitude, csv_path, max_distance_m=4000):
-    roads = pd.read_csv(csv_path,usecols=["entityId", "documentJson"])
+def _iter_roads(csv_path):
+    """Dá (entityId, name, lines) de cada segmento, seja do RoadSegment.csv de referência
+    (colunas entityId, name, location) ou do roadsegments_stats.csv (com documentJson)."""
+    columns = pd.read_csv(csv_path, nrows=0).columns
+
+    if "documentJson" in columns:
+        seen = set()
+        for row in pd.read_csv(csv_path, usecols=["entityId", "documentJson"]).itertuples(index=False):
+            if row.entityId in seen:          # o mesmo segmento repete-se milhares de vezes
+                continue
+            lines, document = road_coordinates(row.documentJson)
+            if lines:
+                seen.add(row.entityId)
+                yield row.entityId, document.get("name"), lines
+    else:
+        for row in pd.read_csv(csv_path, usecols=["entityId", "name", "location"]).itertuples(index=False):
+            try:
+                coordinates = json.loads(row.location).get("coordinates")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if coordinates:
+                yield row.entityId, (None if pd.isna(row.name) else row.name), [coordinates]
+
+
+def find_nearest_road(latitude, longitude, csv_path=ROAD_CSV, max_distance_m=4000):
     nearest = None
 
-    for row in roads.itertuples(index=False):
-        lines, document = road_coordinates(row.documentJson)
-        if not lines:
-            continue
-
+    for entity_id, name, lines in _iter_roads(csv_path):
         for line in lines:
             if not isinstance(line, (list, tuple)) or len(line) < 2:
                 continue
@@ -121,10 +142,10 @@ def find_nearest_road(latitude, longitude, csv_path, max_distance_m=4000):
                     print(f"Skipping invalid road coordinates: {error}")
                     continue
 
-                if nearest is None or distance > nearest["distance_m"]:
+                if nearest is None or distance < nearest["distance_m"]:   # era ">" (escolhia a mais longe)
                     nearest = {
-                        "entityId": row.entityId,
-                        "name": document.get("name"),
+                        "entityId": entity_id,
+                        "name": name,
                         "distance_m": distance,
                     }
 
@@ -134,20 +155,22 @@ def find_nearest_road(latitude, longitude, csv_path, max_distance_m=4000):
     return nearest
 
 
-def nearest_road(label):
+def nearest_road(label=None, csv_path=ROAD_CSV):
+    from location_time import locationCoordinates     # import tardio: find_nearest_road não precisa dele
+
     lat, long, *_ = locationCoordinates()
 
-    match = find_nearest_road(lat, long, "data/roadsegments_stats.csv", )
+    match = find_nearest_road(lat, long, csv_path)
 
     if match:
         print(f"\nNearest Road: {match['name']} ({match['entityId']})")
-        label.config(text=f"\n- Nearest Road: {match['name']}\n"
-                          f"- Road Id: {match['entityId']}\n")
+        if label is not None:
+            label.config(text=f"\n- Nearest Road: {match['name']}\n"
+                              f"- Road Id: {match['entityId']}\n")
 
         return match
 
     print("No road found nearby")
-    label.config(text=f"\nNo road found nearby")
-    return {"entityId": NULL, "name": "No road found nearby", "distance_m": NULL, }
-
-
+    if label is not None:
+        label.config(text=f"\nNo road found nearby")
+    return {"entityId": None, "name": "No road found nearby", "distance_m": None}
