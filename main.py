@@ -102,7 +102,6 @@ def _road_paths(road_id):
     geometry = json.loads(roads.at[road_id, "location"])
     coordinates = geometry.get("coordinates") or []
     lines = coordinates if geometry.get("type") == "MultiLineString" else [coordinates]
-    # GeoJSON guarda [longitude, latitude]; o mapa quer (latitude, longitude).
     return [[(point[1], point[0]) for point in line] for line in lines if len(line) >= 2]
 
 
@@ -260,6 +259,8 @@ class SmartCityApp:
         self.current_map_features = None
         self.current_map_fit_bounds = False
         self.route_busy = False
+        self.content_column_weights = [100, 140, 140]
+        self._column_resize_drag = None
         self.wait_data = None
         self.parking_data = None
         try:
@@ -389,14 +390,19 @@ class SmartCityApp:
 
         content = ctk.CTkFrame(page, fg_color="transparent")
         content.grid(row=1, column=0, columnspan=2, sticky="nsew")
-        content.grid_columnconfigure(0, weight=0, minsize=270)
-        content.grid_columnconfigure(1, weight=1)
-        content.grid_columnconfigure(2, weight=1)
+        pane_columns = (0, 2, 4)
+        for column, weight, minsize in zip(
+            pane_columns, self.content_column_weights, (230, 250, 280)
+        ):
+            content.grid_columnconfigure(column, weight=weight, minsize=minsize)
+        content.grid_columnconfigure(1, weight=0, minsize=10)
+        content.grid_columnconfigure(3, weight=0, minsize=10)
         content.grid_rowconfigure(0, weight=1)
 
         controls = ctk.CTkScrollableFrame(content, fg_color=self.CARD, corner_radius=20,
                                           border_width=1, border_color=self.BORDER, width=250)
-        controls.grid(row=0, column=0, sticky="nsew", padx=(0, 18))
+        controls.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self._add_column_resize_handle(content, 1, 0, 1)
 
         # --- pesquisa por ID ---
         ctk.CTkLabel(controls, text="Pesquisa um registo", text_color=self.NAVY,
@@ -458,9 +464,10 @@ class SmartCityApp:
                      wraplength=210, justify="left").pack(anchor="w", padx=20, pady=(8, 14))
         result_card = ctk.CTkFrame(content, fg_color=self.CARD, corner_radius=20,
                                    border_width=1, border_color=self.BORDER)
-        result_card.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
+        result_card.grid(row=0, column=2, sticky="nsew", padx=8)
         result_card.grid_columnconfigure(0, weight=1)
         result_card.grid_rowconfigure(1, weight=1)
+        self._add_column_resize_handle(content, 3, 1, 2)
 
         ctk.CTkLabel(result_card, text="Resultado", text_color=self.NAVY,
                      font=self._font(16, "bold")).grid(row=0, column=0, sticky="w", padx=24, pady=(22, 12))
@@ -470,7 +477,7 @@ class SmartCityApp:
 
         map_card = ctk.CTkFrame(content, fg_color=self.CARD, corner_radius=20,
                                 border_width=1, border_color=self.BORDER)
-        map_card.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+        map_card.grid(row=0, column=4, sticky="nsew", padx=(8, 0))
         map_card.grid_rowconfigure(1, weight=1)
         map_card.grid_columnconfigure(0, weight=1)
 
@@ -491,6 +498,66 @@ class SmartCityApp:
 
         self.show_empty_state()
         self.id_entry.focus_set()
+
+    def _add_column_resize_handle(self, parent, grid_column, left_pane, right_pane):
+        handle = ctk.CTkFrame(
+            parent,
+            width=4,
+            corner_radius=2,
+            fg_color=self.BORDER,
+            cursor="sb_h_double_arrow",
+        )
+        handle.grid(row=0, column=grid_column, sticky="ns", padx=3)
+        handle.bind(
+            "<Button-1>",
+            lambda event: self._start_column_resize(
+                event, parent, left_pane, right_pane
+            ),
+        )
+        handle.bind("<B1-Motion>", self._resize_content_columns)
+        handle.bind("<ButtonRelease-1>", lambda _event: self._stop_column_resize())
+        handle.bind("<Enter>", lambda _event: handle.configure(fg_color=self.BLUE))
+        handle.bind("<Leave>", lambda _event: handle.configure(fg_color=self.BORDER))
+
+    def _start_column_resize(self, event, content, left_pane, right_pane):
+        pane_columns = (0, 2, 4)
+        left_column = pane_columns[left_pane]
+        right_column = pane_columns[right_pane]
+        self._column_resize_drag = {
+            "content": content,
+            "left_pane": left_pane,
+            "right_pane": right_pane,
+            "start_x": event.x_root,
+            "left_width": content.grid_bbox(left_column, 0)[2],
+            "right_width": content.grid_bbox(right_column, 0)[2],
+        }
+
+    def _resize_content_columns(self, event):
+        drag = self._column_resize_drag
+        if drag is None:
+            return
+
+        left_pane = drag["left_pane"]
+        right_pane = drag["right_pane"]
+        min_widths = (230, 250, 280)
+        total_width = drag["left_width"] + drag["right_width"]
+        left_width = drag["left_width"] + event.x_root - drag["start_x"]
+        left_width = max(min_widths[left_pane], left_width)
+        left_width = min(total_width - min_widths[right_pane], left_width)
+        right_width = total_width - left_width
+
+        self.content_column_weights[left_pane] = left_width
+        self.content_column_weights[right_pane] = right_width
+        pane_columns = (0, 2, 4)
+        drag["content"].grid_columnconfigure(
+            pane_columns[left_pane], weight=left_width
+        )
+        drag["content"].grid_columnconfigure(
+            pane_columns[right_pane], weight=right_width
+        )
+
+    def _stop_column_resize(self):
+        self._column_resize_drag = None
 
     def clear_results(self):
         for widget in self.result_body.winfo_children():
