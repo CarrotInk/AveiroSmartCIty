@@ -14,10 +14,10 @@ from pedestrian_alert import (
     PedestrianApproachMonitor,
 )
 
-PEDESTRIAN_START_M = -16.0
+PEDESTRIAN_START_M = -50.0
 CROSSWALK_Y_M = 0.0
 CAR_SPEED_MPS = 3.0
-CAR_START_X_M = -30.0
+CAR_START_X_M = -50.0
 CAR_STOP_M = -2.5
 PEDESTRIAN_CLEAR_Y_M = 16.0
 APP_REACTION_S = 0.7
@@ -28,6 +28,7 @@ ACCEL_MPS2 = 2.0
 NO_APP_VISIBILITY_M = 2.0
 COLLISION_DISTANCE_M = 1.5
 APP_ALERT_DISTANCE_M = 30.0
+CROSSWALK_MIDPOINT_X_M = 0.0
 
 
 class Simulation:
@@ -50,6 +51,8 @@ class Simulation:
         self.car_state = "a circular"
         self.state_time_s = 0.0
         self.alerts = []
+        self.pedestrian_alert_active = False
+        self.car_passed_crosswalk_midpoint = False
         self.collision = False
         self.finished = False
         self.events.clear()
@@ -97,7 +100,8 @@ class Simulation:
         )
         if alert and self.driver_has_app:
             self.alerts.append(alert)
-            if self.car_state == "a circular":
+            self.pedestrian_alert_active = True
+            if self.car_state == "a circular" and not self.car_passed_crosswalk_midpoint:
                 self.car_state = "a reagir"
                 self.state_time_s = 0.0
                 self._log("O condutor recebe o aviso e inicia uma travagem suave.")
@@ -110,9 +114,11 @@ class Simulation:
             self._log("COLISÃO SIMULADA: o carro não conseguiu parar antes da passadeira.")
             return
 
-        if self.pedestrian_y >= PEDESTRIAN_CLEAR_Y_M and self.car_state == "parado":
-            self.car_state = "a retomar"
-            self._log("O peão já atravessou; o carro retoma a marcha.")
+        if self.pedestrian_y >= PEDESTRIAN_CLEAR_Y_M:
+            self.pedestrian_alert_active = False
+            if self.car_state == "parado":
+                self.car_state = "a retomar"
+                self._log("O peão já atravessou; o carro retoma a marcha.")
         if self.car_x >= 20:
             self.finished = True
             self._log("Simulação concluída.")
@@ -124,8 +130,18 @@ class Simulation:
         )
 
     def _drive_car(self, dt):
+        if (self.car_x >= CROSSWALK_MIDPOINT_X_M
+                and not self.car_passed_crosswalk_midpoint):
+            self.car_passed_crosswalk_midpoint = True
+            self.pedestrian_alert_active = False
+            if self.car_state in ("a reagir", "a travar", "parado"):
+                self.car_state = "a retomar"
+                self.state_time_s = 0.0
+            self._log("O carro já passou metade da passadeira e continua, ignorando o aviso.")
+
         if (not self.driver_has_app
                 and self.car_state == "a circular"
+                and self.car_x < 0
                 and abs(self.pedestrian_y) <= NO_APP_VISIBILITY_M):
             self.car_state = "a reagir"
             self.state_time_s = 0.0
@@ -152,6 +168,8 @@ class Simulation:
 
         next_x = self.car_x + self.car_speed_mps * dt
         if (self.car_state == "a circular"
+                and self.car_x < CAR_STOP_M
+                and self.pedestrian_alert_active
                 and self.pedestrian_y < PEDESTRIAN_CLEAR_Y_M):
             next_x = min(next_x, CAR_STOP_M)
             if next_x == CAR_STOP_M:
