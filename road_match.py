@@ -10,7 +10,6 @@ EARTH_RADIUS_M = 6_371_000
 
 
 def build_compact_roads(source_path, output_path):
-    """Stream the large source file into a compact one-row-per-road CSV."""
     seen_entity_ids = set()
     output_path = Path(output_path)
     temporary_path = output_path.with_name(output_path.name + ".tmp")

@@ -4,11 +4,15 @@ import tkinter as tk
 import threading
 from datetime import datetime, timezone
 from tkinter import messagebox, ttk
+import customtkinter as ctk
 
 import pandas as pd
 
 from location_time import locationCoordinates
 from road_match import find_nearest_road as lookup_nearest_road
+
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("blue")
 
 #===Load data=================================================================================================
 smart_crosswalk = pd.read_csv("data/smartcrosswalk.csv")
@@ -388,7 +392,6 @@ class SmartCityApp:
                 self.root.after(0, self._show_nearest_road_result, None, None, None)
                 return
 
-            # The detail view currently keeps the first 1,000 road observations in memory.
             now = datetime.now().astimezone()
             velocities = []
             rows = road_segments[road_segments["entityId"] == match["entityId"]]
@@ -444,7 +447,6 @@ def main():
     root = tk.Tk()
     SmartCityApp(root)
     root.mainloop()
-
 
 if __name__ == "__main__":
     main()
