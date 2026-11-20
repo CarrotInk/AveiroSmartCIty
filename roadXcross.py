@@ -214,27 +214,32 @@ def _hour_utc(ts):
 
 def _road_speeds(segment_ids, path, chunksize=100_000, use_cache=True):
     """Lê o ficheiro grande aos bocados e só faz parse JSON dos segmentos que interessam.
-    O resultado fica em cache (road_speeds_cache.pkl) enquanto o ficheiro e os segmentos não mudarem."""
-    path = Path(path)
+    A cache (road_speeds_cache.pkl) é partilhada: guarda os segmentos já lidos e só volta a ler o ficheiro
+    se pedirem algum segmento que ainda não lá esteja (nesse caso junta-o aos que já tinha)."""
+    path = Path(path).resolve()      # o mesmo ficheiro dá sempre a mesma chave (relativo ou absoluto)
     keep = set(segment_ids)
     st = path.stat()
-    key = hashlib.md5(repr((str(path), st.st_size, int(st.st_mtime), sorted(keep), CAMERA_IN_KMH,
-                            MAX_SPEED_MPS)).encode()).hexdigest()
+    key = hashlib.md5(repr((str(path), st.st_size, int(st.st_mtime), CAMERA_IN_KMH, MAX_SPEED_MPS)).encode()).hexdigest()
+    have = set()
     if use_cache and SPEEDS_CACHE.exists():
         try:
             cached = pickle.loads(SPEEDS_CACHE.read_bytes())
-            if cached["key"] == key:
-                print("Velocidades das estradas lidas da cache (apaga road_speeds_cache.pkl para forçar nova leitura).")
-                return cached["df"]
+            if cached["key"] == key and "ids" in cached:
+                if keep <= cached["ids"]:
+                    print("Velocidades das estradas lidas da cache (apaga road_speeds_cache.pkl para forçar nova leitura).")
+                    df = cached["df"]
+                    return df if keep == cached["ids"] else df[df["segment_id"].isin(keep)]
+                have = cached["ids"]                      # já tem alguns: vai ler também os que faltam
         except Exception:
             pass
+    keep_read = keep | have
 
     print(f"A ler {path.name} ({st.st_size / 1e9:.2f} GB). Pode demorar vários minutos, não está bloqueado...")
     t0 = time.time()
     out, bad, rows_read = [], 0, 0
     for chunk in pd.read_csv(path, usecols=["entityId", "documentJson"], chunksize=chunksize, dtype=str):
         rows_read += len(chunk)
-        chunk = chunk[chunk["entityId"].isin(keep)]
+        chunk = chunk[chunk["entityId"].isin(keep_read)]
         for s in chunk["documentJson"]:
             try:
                 d = json.loads(s)
@@ -262,8 +267,8 @@ def _road_speeds(segment_ids, path, chunksize=100_000, use_cache=True):
         med = df.groupby("sensor")["speed_ratio"].median().round(2).to_dict()
         print(f"Verificação de unidades - mediana velocidade/limite por sensor: {med}")
     if use_cache:
-        SPEEDS_CACHE.write_bytes(pickle.dumps({"key": key, "df": df}))
-    return df
+        SPEEDS_CACHE.write_bytes(pickle.dumps({"key": key, "ids": keep_read, "df": df}))
+    return df if keep_read == keep else df[df["segment_id"].isin(keep)]
 
 
 def build_profile(roads_path=None):

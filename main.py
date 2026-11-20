@@ -1,11 +1,13 @@
 import json
 import statistics as st
+import threading
 import tkinter as tk
 from datetime import datetime, timezone
 from tkinter import messagebox, ttk
 
 import pandas as pd
 
+import fastest_route
 from road_match import nearest_road
 
 #===Load data=================================================================================================
@@ -52,9 +54,17 @@ class SmartCityApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Aveiro Smart City")
-        self.root.geometry("900x600")
-        self.root.minsize(720, 500)
+        self.root.geometry("920x800")
+        self.root.minsize(760, 720)
         self.root.configure(bg=self.BG)
+
+        self.route_busy = False
+        try:                                       # carrega o mapa uma vez (ms); dá a lista de ruas às caixas
+            self.segments = fastest_route.load_segments()
+            self.streets = fastest_route.list_streets(self.segments)
+        except Exception as error:
+            print(f"Could not load the road map: {error}")
+            self.segments, self.streets = None, []
 
         self.configure_styles()
         self.build_ui()
@@ -190,6 +200,44 @@ class SmartCityApp:
             style="Action.TButton",
             command=self.find_nearest_road,
         ).pack(fill="x")
+
+        ttk.Separator(controls).pack(fill="x", pady=10)
+
+        ttk.Label(
+            controls,
+            text="Fastest route (by car)",
+            style="Section.TLabel",
+        ).pack(anchor="w", pady=(0, 8))
+
+        self.route_from = tk.StringVar()
+        self.route_to = tk.StringVar()
+        self.route_hour = tk.StringVar()
+
+        for label, variable in (("FROM STREET", self.route_from), ("TO STREET", self.route_to)):
+            ttk.Label(controls, text=label, style="Field.TLabel").pack(anchor="w", pady=(0, 4))
+            ttk.Combobox(
+                controls,
+                textvariable=variable,
+                values=self.streets,
+                font=("Segoe UI", 10),
+            ).pack(fill="x", pady=(0, 10), ipady=3)
+
+        ttk.Label(
+            controls,
+            text="HOUR (UTC, EMPTY = NOW)",
+            style="Field.TLabel",
+        ).pack(anchor="w", pady=(0, 4))
+        hour_entry = ttk.Entry(controls, textvariable=self.route_hour, font=("Segoe UI", 11), width=6)
+        hour_entry.pack(anchor="w", pady=(0, 10), ipady=3)
+        hour_entry.bind("<Return>", lambda _event: self.find_route())
+
+        self.route_button = ttk.Button(
+            controls,
+            text="Find fastest route by car",
+            style="Action.TButton",
+            command=self.find_route,
+        )
+        self.route_button.pack(fill="x")
 
         self.status = tk.StringVar(value="Ready")
         ttk.Label(
@@ -365,6 +413,83 @@ class SmartCityApp:
                 ("Location", get_value(latest, "location") or "Not available"),
             ],
         )
+
+    def find_route(self):
+        if self.route_busy:
+            return
+
+        origin = self.route_from.get().strip()
+        destination = self.route_to.get().strip()
+        hour_text = self.route_hour.get().strip()
+
+        if not origin or not destination:
+            messagebox.showwarning("Missing street", "Choose or type both streets.", parent=self.root)
+            return
+        if hour_text and (not hour_text.isdigit() or int(hour_text) > 23):
+            messagebox.showwarning("Invalid hour", "Enter an hour from 0 to 23, or leave it empty.", parent=self.root)
+            return
+        hour = int(hour_text) if hour_text else None
+
+        self.route_busy = True
+        self.route_button.state(["disabled"])
+        self.status.set("Calculating route... the first run reads the large CSV files and can take a few minutes.")
+
+        job = {}
+
+        def work():                                # corre noutra thread para a janela não bloquear
+            try:
+                if self.segments is None:
+                    self.segments = fastest_route.load_segments()
+                job["result"] = fastest_route.fastest_route(origin, destination, hour, segments=self.segments)
+            except Exception as error:
+                job["error"] = error
+            finally:
+                job["done"] = True
+
+        threading.Thread(target=work, daemon=True).start()
+        self.root.after(200, lambda: self.poll_route(job))
+
+    def poll_route(self, job):
+        if not job.get("done"):
+            self.root.after(200, lambda: self.poll_route(job))
+            return
+
+        self.route_busy = False
+        self.route_button.state(["!disabled"])
+
+        error = job.get("error")
+        if error is not None:
+            self.status.set("Route lookup failed")
+            if isinstance(error, fastest_route.AmbiguousStreet):
+                options = error.options
+                text = "Be more specific. Did you mean:\n- " + "\n- ".join(options[:8])
+                if len(options) > 8:
+                    text += f"\n... and {len(options) - 8} more"
+            else:
+                text = str(error)
+            messagebox.showerror("Unable to find a route", text, parent=self.root)
+            return
+
+        route = job["result"]
+        steps = [
+            f"{i}. {g['street']}: {g['length_m']:.0f} m, {fastest_route.format_duration(g['time_s'])}"
+            for i, g in enumerate(fastest_route.group_steps(route["steps"]), 1)
+        ]
+        fields = [
+            ("Route", f"{route['origin']}  \u2192  {route['destination']}"),
+            ("Hour (UTC)", f"{route['hour']}h"),
+            ("Car travel time", fastest_route.format_duration(route["total_s"])),
+            ("Distance", f"{route['distance_m'] / 1000:.2f} km"),
+            ("Average speed", f"{fastest_route.average_speed_kmh(route):.0f} km/h"),
+            ("Moving time", fastest_route.format_duration(route["drive_s"])),
+            ("Delay at crosswalks", fastest_route.format_duration(route["wait_s"])),
+            ("Path", "\n".join(steps)),
+        ]
+        notes = fastest_route.route_notes(route, lang="en")
+        if notes:
+            fields.append(("Notes", "\n".join(notes)))
+
+        self.show_results("Fastest route by car", fields)
 
     def find_nearest_road(self):
         try:
