@@ -5,6 +5,10 @@ import threading
 from datetime import datetime, timezone
 from tkinter import messagebox
 
+from functools import lru_cache
+from pathlib import Path
+from tkintermapview import TkinterMapView
+
 import customtkinter as ctk
 
 import pandas as pd
@@ -16,6 +20,64 @@ from crosswalk_wait import load_crosswalk_data, summarize_wait_time_by_time
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
+
+DATA_DIR = Path(__file__).resolve().parent / "data"
+REFERENCE_DIR = DATA_DIR / "reference-entities"
+
+@lru_cache(maxsize=1)
+def _load_map_sources():
+    crosswalks = pd.read_csv(REFERENCE_DIR / "SmartCrosswalk.csv").set_index("entityId")
+    roads = pd.read_csv(REFERENCE_DIR / "RoadSegment.csv").set_index("entityId")
+    return crosswalks, roads
+
+
+def _polygon_center(location_json):
+    coordinates = json.loads(location_json)["coordinates"][0]
+    if len(coordinates) > 1 and coordinates[0] == coordinates[-1]:
+        coordinates = coordinates[:-1]
+
+    longitude = sum(point[0] for point in coordinates) / len(coordinates)
+    latitude = sum(point[1] for point in coordinates) / len(coordinates)
+    return latitude, longitude
+
+
+def _map_features(crosswalk_ids):
+    crosswalks, roads = _load_map_sources()
+    links = pd.read_csv(roadXcross.LINKS_CSV)
+
+    crosswalk_ids = set(crosswalk_ids)
+    features = []
+
+    for crosswalk_id in sorted(crosswalk_ids):
+        if crosswalk_id not in crosswalks.index:
+            continue
+
+        lat, lon = _polygon_center(crosswalks.at[crosswalk_id, "location"])
+        features.append({
+            "kind": "crosswalk",
+            "position": (lat, lon),
+            "label": f"Passadeira {crosswalk_id.rsplit(':', 1)[-1]}",
+        })
+
+    linked_roads = links[
+        links["smartcrosswalk"].isin(crosswalk_ids)
+        & links["use_for_alert"].astype(str).str.lower().eq("true")
+    ]
+
+    for road_id in linked_roads["segment_id"].dropna().unique():
+        if road_id not in roads.index:
+            continue
+
+        geometry = json.loads(roads.at[road_id, "location"])
+        # GeoJSON stores coordinates as [longitude, latitude].
+        path = [(lat, lon) for lon, lat in geometry["coordinates"]]
+        features.append({
+            "kind": "road",
+            "position": path,
+            "label": f"Rua {road_id.rsplit(':', 1)[-1]}",
+        })
+
+    return features
 
 #===Load data=================================================================================================
 smart_crosswalk = pd.read_csv("data/smartcrosswalk.csv")
@@ -61,8 +123,8 @@ class SmartCityApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Aveiro Smart City")
-        self.root.geometry("1000x680")
-        self.root.minsize(760, 540)
+        self.root.geometry("1320x720")
+        self.root.minsize(1000, 600)
         self.root.configure(fg_color=self.BG)
         self.root.grid_columnconfigure(0, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
@@ -98,6 +160,7 @@ class SmartCityApp:
         content.grid_columnconfigure(0, weight=0, minsize=260)
         content.grid_columnconfigure(1, weight=1)
         content.grid_rowconfigure(0, weight=1)
+        content.grid_columnconfigure(2, weight=1)
 
         controls = ctk.CTkFrame(
             content,
@@ -247,6 +310,30 @@ class SmartCityApp:
             text_color=self.NAVY,
             font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
         ).grid(row=0, column=0, sticky="w", padx=24, pady=(22, 12))
+        result_card.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
+
+        map_card = ctk.CTkFrame(
+            content,
+            fg_color=self.CARD,
+            corner_radius=20,
+            border_width=1,
+            border_color=self.BORDER,
+        )
+        map_card.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+        map_card.grid_rowconfigure(1, weight=1)
+        map_card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            map_card,
+            text="Mapa das passadeiras e ruas próximas",
+            text_color=self.NAVY,
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 10))
+
+        self.map_widget = TkinterMapView(map_card, corner_radius=12)
+        self.map_widget.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        self.map_widget.set_position(40.64, -8.65)
+        self.map_widget.set_zoom(14)
 
         self.result_body = ctk.CTkScrollableFrame(
             result_card,
@@ -508,20 +595,29 @@ class SmartCityApp:
         try:
             if self.wait_data is None:
                 self.wait_data = load_crosswalk_data()
+
+            if not roadXcross.LINKS_CSV.exists():
+                roadXcross.build_links()
+
+            crosswalk_id = f"urn:ngsi-ld:SmartCrosswalk:{crosswalk_number:04d}"
             result = summarize_wait_time_by_time(
                 self.wait_data, crosswalk_number, time_text
             )
-            self.root.after(0, self._show_wait_result, result, None)
-        except Exception as error:
-            self.root.after(0, self._show_wait_result, None, error)
+            features = _map_features([crosswalk_id])
 
-    def _show_wait_result(self, result, error):
+            self.root.after(0, self._show_wait_result, result, features, None)
+        except Exception as error:
+            self.root.after(0, self._show_wait_result, None, [], error)
+
+    def _show_wait_result(self, result, features, error):
         self.wait_button.configure(state="normal")
 
         if error is not None:
             self.status.set("Falha a analisar tempo de espera")
             messagebox.showerror("Falha na análise", str(error), parent=self.root)
             return
+
+        self.show_map_features(features)
 
         if result["status"] == "no_crosswalk":
             self.status.set("Sem registos para esta passadeira")
@@ -561,17 +657,26 @@ class SmartCityApp:
         try:
             roadXcross.ensure_ready()
             warnings = roadXcross.get_warnings(street=street)
-            self.root.after(0, self._show_warnings, warnings, None)
-        except Exception as error:
-            self.root.after(0, self._show_warnings, None, error)
+            crosswalk_ids = [warning["smartcrosswalk"] for warning in warnings]
+            features = _map_features(crosswalk_ids)
 
-    def _show_warnings(self, warnings, error):
+            self.root.after(
+                0, self._show_warnings, warnings, features, None
+            )
+        except Exception as error:
+            self.root.after(0, self._show_warnings, None, [], error)
+
+    def _show_warnings(self, warnings, features, error):
         self.warning_button.configure(state="normal")
 
         if error is not None:
             self.status.set("Falha ao carregar avisos")
-            messagebox.showerror("Falha ao carregar avisos", str(error), parent=self.root)
+            messagebox.showerror(
+                "Falha ao carregar avisos", str(error), parent=self.root
+            )
             return
+
+        self.show_map_features(features)
 
         if not warnings:
             self.show_results("Avisos da rua", [("Resultado", "Sem passadeiras monitorizadas para esta rua.")])
@@ -584,6 +689,32 @@ class SmartCityApp:
                 for warning in warnings
             ],
         )
+
+    def show_map_features(self, features):
+        self.map_widget.delete_all_marker()
+        self.map_widget.delete_all_path()
+
+        points = []
+
+        for feature in features:
+            if feature["kind"] == "crosswalk":
+                lat, lon = feature["position"]
+                self.map_widget.set_marker(lat, lon, text=feature["label"])
+                points.append((lat, lon))
+            else:
+                path = feature["position"]
+                if len(path) >= 2:
+                    self.map_widget.set_path(path, width=3)
+                    points.extend(path)
+
+        if points:
+            center_lat = sum(point[0] for point in points) / len(points)
+            center_lon = sum(point[1] for point in points) / len(points)
+            self.map_widget.set_position(center_lat, center_lon)
+            self.map_widget.set_zoom(16)
+        else:
+            self.map_widget.set_position(40.64, -8.65)
+            self.map_widget.set_zoom(14)
 #=============================================================================================================
 
 def main():
