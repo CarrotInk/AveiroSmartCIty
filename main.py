@@ -11,6 +11,8 @@ import pandas as pd
 
 from location_time import locationCoordinates
 from road_match import find_nearest_road as lookup_nearest_road
+import roadXcross
+from crosswalk_wait import load_crosswalk_data, summarize_wait_time_by_time
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -65,6 +67,8 @@ class SmartCityApp:
         self.root.grid_columnconfigure(0, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
         self.build_ui()
+
+        self.wait_data = None
 
     def build_ui(self):
         page = ctk.CTkFrame(self.root, fg_color="transparent", corner_radius=0)
@@ -185,6 +189,36 @@ class SmartCityApp:
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
         )
         self.nearest_road_button.pack(fill="x", padx=20, pady=(8, 0))
+
+        self.wait_time_entry = ctk.CTkEntry(
+            controls,
+            height=38,
+            placeholder_text="Hora UTC (HH:MM)",
+        )
+        self.wait_time_entry.pack(fill="x", padx=20, pady=(14, 6))
+
+        self.wait_button = ctk.CTkButton(
+            controls,
+            text="Analisar espera da passadeira",
+            command=self.analyze_wait,
+            height=38,
+        )
+        self.wait_button.pack(fill="x", padx=20, pady=(0, 10))
+
+        self.street_entry = ctk.CTkEntry(
+            controls,
+            height=38,
+            placeholder_text="Nome da rua",
+        )
+        self.street_entry.pack(fill="x", padx=20, pady=(6, 6))
+
+        self.warning_button = ctk.CTkButton(
+            controls,
+            text="Avisos da rua",
+            command=self.show_street_warnings,
+            height=38,
+        )
+        self.warning_button.pack(fill="x", padx=20, pady=(0, 10))
 
         self.status = tk.StringVar(value="Ready")
         ctk.CTkLabel(
@@ -444,6 +478,110 @@ class SmartCityApp:
                 ("ID da rua", match["entityId"]),
                 ("Distância", f"{match['distance_m']:.1f} m"),
                 ("Velocidade média", average_velocity),
+            ],
+        )
+
+    def analyze_wait(self):
+        raw_id = self.record_id.get().strip()
+        time_text = self.wait_time_entry.get().strip()
+
+        if not raw_id.isdigit():
+            messagebox.showwarning("ID inválido", "Insira o ID numérico da passadeira.", parent=self.root)
+            return
+        if self.category.get() != "Smart crosswalk":
+            messagebox.showwarning(
+                "Categoria inválida",
+                "Selecione Smart crosswalk e insira o ID da passadeira.",
+                parent=self.root,
+            )
+            return
+
+        self.wait_button.configure(state="disabled")
+        self.status.set("A analisar tempo de espera...")
+        threading.Thread(
+            target=self._wait_worker,
+            args=(int(raw_id), time_text),
+            daemon=True,
+        ).start()
+
+    def _wait_worker(self, crosswalk_number, time_text):
+        try:
+            if self.wait_data is None:
+                self.wait_data = load_crosswalk_data()
+            result = summarize_wait_time_by_time(
+                self.wait_data, crosswalk_number, time_text
+            )
+            self.root.after(0, self._show_wait_result, result, None)
+        except Exception as error:
+            self.root.after(0, self._show_wait_result, None, error)
+
+    def _show_wait_result(self, result, error):
+        self.wait_button.configure(state="normal")
+
+        if error is not None:
+            self.status.set("Falha a analisar tempo de espera")
+            messagebox.showerror("Falha na análise", str(error), parent=self.root)
+            return
+
+        if result["status"] == "no_crosswalk":
+            self.status.set("Sem registos para esta passadeira")
+            messagebox.showinfo("Sem dados", "Não há registos para esta passadeira.", parent=self.root)
+            return
+        if result["status"] == "no_data":
+            self.status.set("Sem dados nesse intervalo")
+            messagebox.showinfo("Sem dados", "Não há tempos de espera válidos nesse intervalo.", parent=self.root)
+            return
+
+        self.show_results(
+            "Tempo de espera",
+            [
+                ("Intervalo UTC", f"{result['start']}–{result['end']}"),
+                ("Espera média", f"{result['average']:.2f} s"),
+                ("Mediana", f"{result['median']:.2f} s"),
+                ("Registos", result["records"]),
+                ("Dias distintos", result["days"]),
+            ],
+        )
+
+    def show_street_warnings(self):
+        street = self.street_entry.get().strip()
+        if not street:
+            messagebox.showwarning("Rua em falta", "Insira o nome da rua.", parent=self.root)
+            return
+
+        self.warning_button.configure(state="disabled")
+        self.status.set("A preparar avisos da rua...")
+        threading.Thread(
+            target=self._warnings_worker,
+            args=(street,),
+            daemon=True,
+        ).start()
+
+    def _warnings_worker(self, street):
+        try:
+            roadXcross.ensure_ready()
+            warnings = roadXcross.get_warnings(street=street)
+            self.root.after(0, self._show_warnings, warnings, None)
+        except Exception as error:
+            self.root.after(0, self._show_warnings, None, error)
+
+    def _show_warnings(self, warnings, error):
+        self.warning_button.configure(state="normal")
+
+        if error is not None:
+            self.status.set("Falha ao carregar avisos")
+            messagebox.showerror("Falha ao carregar avisos", str(error), parent=self.root)
+            return
+
+        if not warnings:
+            self.show_results("Avisos da rua", [("Resultado", "Sem passadeiras monitorizadas para esta rua.")])
+            return
+
+        self.show_results(
+            "Avisos da rua",
+            [
+                (f"Passadeira {warning['crosswalk']}", roadXcross.format_warning(warning, lang="pt"))
+                for warning in warnings
             ],
         )
 #=============================================================================================================

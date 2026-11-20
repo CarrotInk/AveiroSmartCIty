@@ -99,47 +99,53 @@ def is_in_time_window(series_minutes, target_minutes, window_half_width=15):
         return (series_minutes >= start_min) & (series_minutes <= end_min)
 
 
+def summarize_wait_time_by_time(df, crosswalk_number, time_str):
+    parsed_time = datetime.strptime(time_str.strip(), "%H:%M")
+    entity_id = f"urn:ngsi-ld:SmartCrosswalk:{crosswalk_number:04d}"
+    target_minutes = parsed_time.hour * 60 + parsed_time.minute
+
+    subset = df[df["entityId"] == entity_id]
+    if subset.empty:
+        return {"status": "no_crosswalk"}
+
+    mask = is_in_time_window(subset["minutes_of_day"], target_minutes)
+    filtered = subset[mask].dropna(subset=["wait_time_sec"])
+    if filtered.empty:
+        return {"status": "no_data"}
+
+    waits = filtered["wait_time_sec"]
+    return {
+        "status": "ok",
+        "start": format_minutes_hhmm(target_minutes - 15),
+        "end": format_minutes_hhmm(target_minutes + 15),
+        "average": float(waits.mean()),
+        "median": float(waits.median()),
+        "records": len(filtered),
+        "days": int(filtered["dt_utc"].dt.date.nunique()),
+    }
+
+
 def average_wait_time_by_time(df, crosswalk_number, time_str):
     try:
-        parsed_time = datetime.strptime(time_str.strip(), "%H:%M")
+        result = summarize_wait_time_by_time(df, crosswalk_number, time_str)
     except ValueError:
         print("Formato de hora inválido. Usa HH:MM (ex: 14:30).")
         return
 
-    entity_id = f"urn:ngsi-ld:SmartCrosswalk:{crosswalk_number:04d}"
-    target_minutes = parsed_time.hour * 60 + parsed_time.minute
-
-    start_label = format_minutes_hhmm(target_minutes - 15)
-    end_label = format_minutes_hhmm(target_minutes + 15)
-
-    subset = df[df["entityId"] == entity_id]
-    if subset.empty:
-        ids = sorted(df["entityId"].str[-4:].unique())
-        print(f"Não há registos para a crosswalk {crosswalk_number:04d}. Existentes: {', '.join(ids)}")
+    if result["status"] == "no_crosswalk":
+        print(f"Não há registos para a crosswalk {crosswalk_number:04d}.")
+        return
+    if result["status"] == "no_data":
+        print(f"Não há registos válidos perto de {time_str}.")
         return
 
-    mask = is_in_time_window(subset["minutes_of_day"], target_minutes, window_half_width=15)
-    filtered = subset[mask].dropna(subset=["wait_time_sec"])
-
-    if filtered.empty:
-        print(
-            f"na crosswalk {crosswalk_number:04d} no intervalo [{start_label}; {end_label}] "
-            f"não existem registos válidos de wait_time (a passadeira pode não ter dados a essa hora)."
-        )
-        return
-
-    waits = filtered["wait_time_sec"]
-    avg_wait, median_wait, count = waits.mean(), waits.median(), len(waits)
-    n_days = filtered["dt_utc"].dt.date.nunique()
     print(
-        f"Crosswalk {crosswalk_number:04d}, intervalo [{start_label}; {end_label}] UTC: "
-        f"espera média = {avg_wait:.2f} s | mediana = {median_wait:.2f} s "
-        f"({count} registos, {n_days} dia(s) distinto(s))."
+        f"Crosswalk {crosswalk_number:04d}, intervalo "
+        f"[{result['start']}; {result['end']}] UTC: "
+        f"espera média = {result['average']:.2f} s | "
+        f"mediana = {result['median']:.2f} s "
+        f"({result['records']} registos, {result['days']} dia(s))."
     )
-    if count < MIN_RECORDS or n_days < MIN_DAYS:
-        print(f"  Aviso: poucos dados (menos de {MIN_RECORDS} registos ou {MIN_DAYS} dias), o valor é pouco fiável.")
-    if avg_wait > 2 * median_wait:
-        print("  Aviso: a média é muito maior que a mediana, há esperas muito longas a puxá-la para cima.")
 
 
 def main():
