@@ -1,10 +1,3 @@
-"""Simulação de aviso ao condutor quando um peão se aproxima depressa.
-
-Executar ``python pedestrian_simulation.py`` para abrir a animação, ou
-``python pedestrian_simulation.py --headless --speed 3.5`` para testar sem GUI.
-Só há aviso quando a velocidade de aproximação ultrapassa o limiar configurado.
-"""
-
 import argparse
 import math
 import time

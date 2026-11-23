@@ -4,8 +4,8 @@ Um projeto em contexto de hackathon para explorar como dados reais podem ajudar 
 
 ## Objetivos do Projeto
 
-- **Mobilidade**: Melhorar a mobilidade pedestre e por carro pela cidade.
-- **Acessibilidade**: Tornar a informação mais acessível às pessoas para ser usada no dia a dia.
+- **Mobilidade** - Melhorar a mobilidade pedestre e por carro pela cidade.
+- **Acessibilidade** - Tornar a informação mais acessível às pessoas para ser usada no dia a dia.
 
 ## Funcionalidades:
 
@@ -21,6 +21,11 @@ Um projeto em contexto de hackathon para explorar como dados reais podem ajudar 
 - `road_match.py` — Funções que utilizam a localização do location_time.pv para estimar a rua mais próxima do utilizador.
 - `Data available.json` — Ficheiro complementar para ajudar a compreender os dados durante o desenvolvimento.
 - `Simulataions` - Uma pasta com simulações à parte da app, com objetivo de simular eventos reais.
+
+## Ferramentas Utilizadas
+
+- **IDE** - Pycharm e Visual Studio Code
+- **AI** - Claude e Github Copilot
 
 ## Acknowledgements
 

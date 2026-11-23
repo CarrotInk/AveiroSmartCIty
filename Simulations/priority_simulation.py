@@ -1,24 +1,3 @@
-"""
-priority_simulation - simulação em que um condutor é avisado de que uma ambulância se está a aproximar.
-
-Usa o priority_vehicle_alert.py tal como está: a simulação só gera as posições (como faria o sistema de
-localização de veículos) e chama PriorityVehicleMonitor.update(...) a cada passo; o aviso aparece quando a
-ambulância entra no raio de alerta.
-
-Cenário: a ambulância e o condutor andam pelo mesmo percurso real do mapa de Aveiro (RoadSegment.csv). O
-condutor vai à frente a velocidade normal; a ambulância vem atrás, mais rápida. Quando entra no raio, o
-condutor é avisado, encosta, a ambulância passa e ele retoma a marcha.
-
-Uso a partir do main (abre numa janela por cima):
-    import priority_simulation
-    priority_simulation.open_window(self.root)
-
-Uso direto (abre a janela; --headless só escreve a cronologia na consola):
-    python priority_simulation.py
-    python priority_simulation.py --from "Avenida Vasco Branco" --to "Rua Pedro Álvares Cabral" --radius 500
-    python priority_simulation.py --headless
-Só precisa de pandas e numpy (mais o tkinter para a janela).
-"""
 import argparse
 import json
 import math

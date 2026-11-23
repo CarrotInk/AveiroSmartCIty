@@ -1,31 +1,3 @@
-"""
-fastest_route - caminho mais rápido DE CARRO entre duas ruas (ATCLL, Aveiro).
-
-O resultado é o tempo que um carro demora (nada de tempos a pé). O tempo de cada segmento de estrada é:
-    tempo = comprimento / velocidade média (a essa hora)  +  espera média das passadeiras ligadas ao segmento
-
-- Velocidade: averageVelocity do roadsegments_stats.csv (média por segmento e hora), tirada da cache que o
-  roadXcross já guarda (road_speeds_cache.pkl): o ficheiro grande só é lido se essa cache não existir. Se o segmento não tiver
-  dados nessa hora usa a média de todas as horas; se não tiver nada, o averageVelocity do RoadSegment.csv;
-  em último caso, uma fração do limite de velocidade (maxAllowedVelocity).
-- Espera: média por passadeira e hora do crosswalk_hourly_profile.csv do roadXcross (já calculada), ligada
-  às ruas pelas ligações do roadXcross (crosswalk_road_links.csv).
-- O RoadSegment.csv tem um segmento por sentido (oneway=False aparece duplicado ao contrário), por isso o
-  grafo é dirigido: cada segmento só se percorre de startPoint para endPoint.
-
-Uso como módulo:
-    import fastest_route
-    r = fastest_route.fastest_route("Rua de Ovar", "Avenida Europa", hour=8)
-    print(fastest_route.format_route(r))
-
-Uso na linha de comandos (sem argumentos abre o menu):
-    python fastest_route.py "Rua de Ovar" "Avenida Europa" --hour 8
-    python fastest_route.py "Rua de Ovar" "Avenida Europa" --no-crosswalks
-    python fastest_route.py --streets                      # lista as ruas conhecidas
-
-A origem/destino também pode ser o id de um segmento (ex: 10956 ou urn:ngsi-ld:RoadSegment:10956).
-As horas são UTC (== hora de Aveiro em novembro). Só precisa de pandas e numpy.
-"""
 import argparse
 import difflib
 import hashlib

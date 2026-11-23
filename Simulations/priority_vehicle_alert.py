@@ -1,9 +1,3 @@
-"""Alertas para veículos prioritários próximos da localização do utilizador.
-
-O módulo não fornece dados de veículos: chame ``PriorityVehicleMonitor.update``
-sempre que o sistema de localização de veículos receber uma atualização.
-"""
-
 import math
 import re
 import unicodedata
